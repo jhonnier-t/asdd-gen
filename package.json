@@ -1,0 +1,33 @@
+{
+  "name": "asdd-gen",
+  "version": "0.1.0",
+  "description": "Agentic Spec Driven Development generator — auto-generates .github ASDD structure using GitHub Copilot",
+  "keywords": [
+    "agent",
+    "ai",
+    "asdd",
+    "copilot",
+    "cli",
+    "spec",
+    "tdd",
+    "gherkin",
+    "github"
+  ],
+  "homepage": "https://github.com/your-org/asdd-gen",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "asdd-gen": "index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "src/"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test 'tests/*.test.mjs'"
+  }
+}
