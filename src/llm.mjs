@@ -61,6 +61,25 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
       throw new Error(suggestions.join('\n   '))
     }
 
+    // Handle 401 account type not supported
+    if (response.status === 401 && errorDetail.includes('account type is not currently supported')) {
+      const suggestions = [
+        'Your GitHub account type is not currently supported for this model endpoint.',
+        '',
+        'What to do next:',
+        '   1. Check your available models:',
+        '      https://github.com/marketplace/models',
+        '   2. Verify GitHub Models access:',
+        '      https://github.com/models',
+        '   3. Try a different model available for your account:',
+        '      npx asdd-gen --model openai/gpt-4o-mini --token ghp_xxx...',
+        '      npx asdd-gen --model mistral-large --token ghp_xxx...',
+        '',
+        'If this persists, your account or organization plan may not support this endpoint yet.',
+      ]
+      throw new Error(suggestions.join('\n   '))
+    }
+
     // Handle 400 Unknown model error
     if (response.status === 400 && errorDetail.includes('Unknown model')) {
       const suggestions = [

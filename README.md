@@ -204,6 +204,22 @@ Tokens starting with `github_pat_` are also valid (fine-grained format).
 
 **Solution**: Request access at https://github.com/models
 
+### "Your account type is not currently supported" (HTTP 401)
+
+**Error**: GitHub Models API error [401]: Your account type is not currently supported
+
+**Reason**: Your GitHub account type or organization plan does not support that model endpoint yet.
+
+**Solution**:
+1. Check available models for your account: **https://github.com/marketplace/models**
+2. Verify access/rollout status: **https://github.com/models**
+3. Retry with another model:
+
+```bash
+npx asdd-gen --model openai/gpt-4o-mini --token ghp_xxx...
+npx asdd-gen --model mistral-large --token ghp_xxx...
+```
+
 ### Unknown model error (HTTP 400)
 
 **Error**: Unknown model: openai/gpt-4o
