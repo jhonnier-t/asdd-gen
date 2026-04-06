@@ -18,6 +18,11 @@ async function fetchAvailableModels(token) {
     if (!Array.isArray(data)) return []
 
     return data
+      .filter((model) => {
+        // Prefer catalog entries explicitly marked for text generation.
+        // If task is missing, keep the model for backward compatibility.
+        return !model?.task || model.task === 'chat-completion'
+      })
       .map((model) => model?.id)
       .filter((id) => typeof id === 'string' && id.length > 0)
   } catch {
@@ -41,6 +46,14 @@ function isLikelyChatModel(modelId) {
 
 function quoteModelArg(modelId) {
   return `"${modelId}"`
+}
+
+function sanitizeModelForDisplay(modelId) {
+  return toPublicModelName(modelId)
+}
+
+function sanitizeErrorDetailForDisplay(detail) {
+  return String(detail).replace(/azureml:\/\/registries\/[^\s"']+/g, '[provider-model-id]')
 }
 
 function toPublicModelName(modelId) {
@@ -212,6 +225,7 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
   const url = `${GITHUB_MODELS_ENDPOINT}/chat/completions`
   const availableModels = await fetchAvailableModels(token)
   const resolvedModel = resolveModelForAccount(model, availableModels)
+  const displayModel = sanitizeModelForDisplay(model)
   const modelsToTry = buildModelTryOrder(model, resolvedModel, availableModels)
   const attemptedModels = []
   let response = null
@@ -321,7 +335,7 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
       const modelsToShow = suggestedModels.length ? suggestedModels : fallbackModels
 
       const suggestions = [
-        `Model "${model}" is not available in your account.`,
+        `Model "${displayModel}" is not available in your account.`,
         '',
         'Check your available models:',
         '   https://github.com/marketplace/models',
@@ -362,8 +376,8 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
     }
 
     throw new Error(
-      `GitHub Models API error [${response.status}]: ${errorDetail}\n` +
-      `Model: ${model} | Endpoint: ${url}`
+      `GitHub Models API error [${response.status}]: ${sanitizeErrorDetailForDisplay(errorDetail)}\n` +
+      `Model: ${displayModel} | Endpoint: ${url}`
     )
   }
 
