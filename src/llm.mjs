@@ -42,6 +42,21 @@ function quoteModelArg(modelId) {
   return `"${modelId}"`
 }
 
+function toPublicModelName(modelId) {
+  const parsed = parseAzureModelId(modelId)
+  if (parsed) return parsed.name
+  return modelId
+}
+
+function toUniquePublicModels(modelIds) {
+  const result = []
+  for (const modelId of modelIds) {
+    const publicName = toPublicModelName(modelId)
+    if (!result.includes(publicName)) result.push(publicName)
+  }
+  return result
+}
+
 function parseAzureModelId(modelId) {
   const match = modelId.match(/\/models\/([^/]+)\/versions\/(\d+)/i)
   if (!match) return null
@@ -123,6 +138,45 @@ function resolveModelForAccount(requestedModel, availableModels) {
   return requestedModel
 }
 
+function buildModelTryOrder(requestedModel, resolvedModel, availableModels) {
+  const tryOrder = []
+  const add = (value) => {
+    if (typeof value !== 'string' || !value.length) return
+    if (!tryOrder.includes(value)) tryOrder.push(value)
+  }
+
+  add(requestedModel)
+  add(resolvedModel)
+
+  const parsedResolved = parseAzureModelId(resolvedModel)
+  if (parsedResolved) add(parsedResolved.name)
+
+  const aliasCandidates = resolveAliasCandidates(requestedModel)
+  const azureModels = availableModels.map(parseAzureModelId).filter(Boolean)
+
+  for (const alias of aliasCandidates) {
+    const matches = azureModels
+      .filter((m) => m.name === alias)
+      .sort((a, b) => b.version - a.version)
+    for (const match of matches) {
+      add(match.id)
+      add(match.name)
+    }
+  }
+
+  for (const alias of aliasCandidates) {
+    const partialMatches = azureModels
+      .filter((m) => m.name.includes(alias))
+      .sort((a, b) => b.version - a.version)
+    for (const match of partialMatches) {
+      add(match.id)
+      add(match.name)
+    }
+  }
+
+  return tryOrder.slice(0, 8)
+}
+
 /**
  * Calls the GitHub Models chat completions API.
  *
@@ -138,29 +192,42 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
   const url = `${GITHUB_MODELS_ENDPOINT}/chat/completions`
   const availableModels = await fetchAvailableModels(token)
   const resolvedModel = resolveModelForAccount(model, availableModels)
+  const modelsToTry = buildModelTryOrder(model, resolvedModel, availableModels)
+  const attemptedModels = []
+  let response = null
+  let errorDetail = ''
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: resolvedModel,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-    }),
-  })
+  for (const candidateModel of modelsToTry) {
+    attemptedModels.push(candidateModel)
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: candidateModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    })
 
-  if (!response.ok) {
-    let errorDetail = ''
+    if (response.ok) break
+
     try {
       const errData = await response.json()
       errorDetail = errData?.error?.message ?? JSON.stringify(errData)
     } catch {
       errorDetail = await response.text()
     }
+
+    if (!(response.status === 400 && errorDetail.includes('Unknown model'))) {
+      break
+    }
+  }
+
+  if (!response?.ok) {
 
     // Handle 401 Unauthorized with models permission issue
     if (response.status === 401 && errorDetail.includes('models')) {
@@ -206,6 +273,7 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
     // Handle 400 Unknown model error
     if (response.status === 400 && errorDetail.includes('Unknown model')) {
       const chatCapableModels = availableModels.filter(isLikelyChatModel)
+      const publicChatModels = toUniquePublicModels(chatCapableModels)
       const preferredModels = [
         'openai/gpt-4o-mini',
         'claude-3.5-haiku',
@@ -213,8 +281,8 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
         'google/gemini-2.0-flash',
         'mistral-large',
       ]
-      const suggestedModels = preferredModels.filter((m) => chatCapableModels.includes(m))
-      const fallbackModels = chatCapableModels.slice(0, 5)
+      const suggestedModels = preferredModels.filter((m) => publicChatModels.includes(m))
+      const fallbackModels = publicChatModels.slice(0, 5)
       const modelsToShow = suggestedModels.length ? suggestedModels : fallbackModels
 
       const suggestions = [
@@ -225,7 +293,14 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
       ]
 
       if (resolvedModel !== model) {
-        suggestions.push('', `Tried automatic mapping to: ${resolvedModel}`)
+        suggestions.push('', 'Tried automatic account mapping for your requested model.')
+      }
+
+      if (attemptedModels.length) {
+        suggestions.push('', 'Attempted model aliases:')
+        for (const attemptedModel of toUniquePublicModels(attemptedModels)) {
+          suggestions.push(`   ${attemptedModel}`)
+        }
       }
 
       if (modelsToShow.length) {
@@ -246,11 +321,6 @@ export async function chat({ token, model, messages, maxTokens = 4096, temperatu
           'Verify GitHub Models access: https://github.com/models',
           'See GitHub Models documentation: https://docs.github.com/en/github-models'
         )
-      }
-
-      const azureOpenAiModels = chatCapableModels.filter((m) => m.includes('/azure-openai/models/'))
-      if (azureOpenAiModels.length) {
-        suggestions.push('', 'Tip: If your account exposes Azure model IDs, use them exactly as listed.')
       }
 
       throw new Error(suggestions.join('\n   '))
