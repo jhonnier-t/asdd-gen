@@ -47,13 +47,22 @@ const MAX_README_CHARS = 3000
 /**
  * Reads and builds the project context from the given root directory.
  * @param {string} rootDir - Absolute path to the project root
+ * @param {object} [options]
+ * @param {(event: {type: string, path?: string, message?: string}) => void} [options.onProgress]
  * @returns {ProjectContext}
  */
-export function readProjectContext(rootDir) {
-  const packageJson = readPackageJson(rootDir)
-  const readme = readReadme(rootDir)
-  const fileTree = buildFileTree(rootDir)
+export function readProjectContext(rootDir, options = {}) {
+  const { onProgress } = options
+
+  const packageJson = readPackageJson(rootDir, onProgress)
+  const readme = readReadme(rootDir, onProgress)
+  const { tree: fileTree, stats: scanStats } = buildFileTree(rootDir, onProgress)
   const techStack = detectTechStack(rootDir, packageJson)
+
+  onProgress?.({
+    type: 'summary',
+    message: `Scanned ${scanStats.totalVisitedDirs} folders and ${scanStats.totalVisitedFiles} files (included ${scanStats.includedFiles} in context tree)`,
+  })
 
   return {
     rootDir,
@@ -63,6 +72,7 @@ export function readProjectContext(rootDir) {
     fileTree,
     packageJson,
     readme,
+    contextStats: scanStats,
   }
 }
 
@@ -70,22 +80,24 @@ export function readProjectContext(rootDir) {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function readPackageJson(rootDir) {
+function readPackageJson(rootDir, onProgress) {
   const filePath = join(rootDir, 'package.json')
   if (!existsSync(filePath)) return null
   try {
+    onProgress?.({ type: 'file-read', path: relative(rootDir, filePath) || 'package.json' })
     return JSON.parse(readFileSync(filePath, 'utf8'))
   } catch {
     return null
   }
 }
 
-function readReadme(rootDir) {
+function readReadme(rootDir, onProgress) {
   const candidates = ['README.md', 'README.mdx', 'readme.md', 'Readme.md']
   for (const name of candidates) {
     const filePath = join(rootDir, name)
     if (existsSync(filePath)) {
       try {
+        onProgress?.({ type: 'file-read', path: relative(rootDir, filePath) || name })
         const content = readFileSync(filePath, 'utf8')
         return content.slice(0, MAX_README_CHARS)
       } catch {
@@ -96,12 +108,21 @@ function readReadme(rootDir) {
   return ''
 }
 
-function buildFileTree(rootDir) {
+function buildFileTree(rootDir, onProgress) {
   const lines = []
   let count = 0
+  const stats = {
+    totalVisitedDirs: 0,
+    totalVisitedFiles: 0,
+    includedFiles: 0,
+    skippedDirs: 0,
+    truncated: false,
+  }
 
   function walk(dir, depth, prefix) {
     if (depth > MAX_TREE_DEPTH || count >= MAX_TREE_ENTRIES) return
+
+    stats.totalVisitedDirs++
 
     let entries
     try {
@@ -120,7 +141,12 @@ function buildFileTree(rootDir) {
     })
 
     for (let i = 0; i < entries.length; i++) {
-      if (count >= MAX_TREE_ENTRIES) { lines.push(`${prefix}... (truncated)`); return }
+      if (count >= MAX_TREE_ENTRIES) {
+        lines.push(`${prefix}... (truncated)`)
+        stats.truncated = true
+        onProgress?.({ type: 'truncated', message: 'Context tree truncated at maximum entry limit' })
+        return
+      }
 
       const name = entries[i]
       const fullPath = join(dir, name)
@@ -129,22 +155,28 @@ function buildFileTree(rootDir) {
       const childPrefix = isLast ? prefix + '    ' : prefix + '│   '
 
       if (isDir(fullPath)) {
-        if (SKIP_DIRS.has(name)) continue
+        if (SKIP_DIRS.has(name)) {
+          stats.skippedDirs++
+          continue
+        }
         lines.push(`${prefix}${connector}${name}/`)
         count++
         walk(fullPath, depth + 1, childPrefix)
       } else {
+        stats.totalVisitedFiles++
         const ext = extname(name).toLowerCase()
         if (RELEVANT_EXTENSIONS.has(ext) || RELEVANT_CONFIG_NAMES.has(name)) {
           lines.push(`${prefix}${connector}${name}`)
           count++
+          stats.includedFiles++
+          onProgress?.({ type: 'file-indexed', path: relative(rootDir, fullPath) })
         }
       }
     }
   }
 
   walk(rootDir, 0, '')
-  return lines.join('\n')
+  return { tree: lines.join('\n'), stats }
 }
 
 function isDir(p) {

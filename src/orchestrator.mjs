@@ -29,16 +29,38 @@ export async function orchestrate(opts) {
   const outputDir = opts.output ?? process.cwd()
   const model = opts.model ?? 'openai/gpt-4o'
   const dryRun = opts['dry-run'] ?? false
+  const verboseContext = (opts['verbose-context'] ?? true) && !opts['quiet-context']
 
   log.title('asdd-gen — Agentic Spec Driven Development Generator')
 
   // ─── Phase 0: Context ──────────────────────────────────────────────────────
-  log.phase(0, 'Reading project context...')
-  const ctx = readProjectContext(outputDir)
+  log.phase(0, 'Understanding project context...')
+  const ctx = readProjectContext(outputDir, {
+    onProgress: verboseContext
+      ? (event) => {
+          if (event.type === 'file-read') {
+            log.dim(`  • reading: ${event.path}`)
+            return
+          }
+          if (event.type === 'file-indexed') {
+            log.dim(`  • indexed: ${event.path}`)
+            return
+          }
+          if (event.message) {
+            log.dim(`  • ${event.message}`)
+          }
+        }
+      : undefined,
+  })
 
   log.info(`Project  : ${ctx.projectName}`)
   log.info(`Tech     : ${ctx.techStack.length ? ctx.techStack.join(', ') : 'none detected'}`)
   log.info(`Model    : ${model}`)
+  if (ctx.contextStats) {
+    log.info(
+      `Context : ${ctx.contextStats.totalVisitedDirs} dirs, ${ctx.contextStats.totalVisitedFiles} files scanned, ${ctx.contextStats.includedFiles} indexed`
+    )
+  }
   if (dryRun) log.warn('Dry-run mode — no files will be written')
   console.log('')
 
@@ -68,45 +90,33 @@ export async function orchestrate(opts) {
   /** @type {Record<string, string>} collected file contents across all phases */
   const files = {}
 
+  log.phase('⚙️ ', 'Generating ASDD agents and instruction files...')
+  console.log('')
+
   // ─── Phase 1: Spec ─────────────────────────────────────────────────────────
   log.phase(1, 'Generating specification (sequential)...')
-  log.agent('spec', 'running...')
 
   const specFiles = await runSpecAgent(agentArgs)
   Object.assign(files, specFiles)
-  log.agent('spec', `done — ${Object.keys(specFiles).join(', ')}`)
+  log.agent('spec', `created ${Object.keys(specFiles).length} files — ${Object.keys(specFiles).join(', ')}`)
   console.log('')
 
   // ─── Phase 2: TDD + Implementation (parallel) ──────────────────────────────
-  log.phase(2, 'Running TDD + Implementation agents in parallel...')
-  log.agent('tdd-backend',  'running...')
-  log.agent('tdd-frontend', 'running...')
-  log.agent('backend',      'running...')
-  log.agent('frontend',     'running...')
+  log.phase(2, 'Generating TDD and implementation agents in parallel...')
 
-  const phase2Results = await Promise.allSettled([
-    runTddBackendAgent(agentArgs),
-    runTddFrontendAgent(agentArgs),
-    runBackendAgent(agentArgs),
-    runFrontendAgent(agentArgs),
-  ])
+  const phase2Tasks = [
+    { name: 'tdd-backend', run: () => runTddBackendAgent(agentArgs) },
+    { name: 'backend', run: () => runBackendAgent(agentArgs) },
+    { name: 'tdd-frontend', run: () => runTddFrontendAgent(agentArgs) },
+    { name: 'frontend', run: () => runFrontendAgent(agentArgs) },
+  ]
 
-  processPhaseResults(phase2Results, [
-    'tdd-backend',
-    'tdd-frontend',
-    'backend',
-    'frontend',
-  ], files)
+  const phase2Results = await Promise.allSettled(phase2Tasks.map((task) => task.run()))
+  processPhaseResults(phase2Results, phase2Tasks.map((task) => task.name), files)
   console.log('')
 
   // ─── Phase 3: Documentation + QA + GitHub Structure (parallel) ────────────
-  log.phase(3, 'Running Documentation + QA + Skills + Tooling agents in parallel...')
-  log.agent('documentation', 'running...')
-  log.agent('qa',            'running...')
-  log.agent('orchestrator',  'running...')
-  log.agent('skills',        'running...')
-  log.agent('git-hooks',     'running...')
-  log.agent('vscode-config', 'running...')
+  log.phase(3, 'Generating documentation, QA, orchestration, and tooling artifacts...')
 
   const phase3Results = await Promise.allSettled([
     runDocumentationAgent(agentArgs),
@@ -153,7 +163,7 @@ function processPhaseResults(results, names, files) {
     const name = names[i]
     if (result.status === 'fulfilled') {
       Object.assign(files, result.value)
-      log.agent(name, `done — ${Object.keys(result.value).join(', ')}`)
+      log.agent(name, `created ${Object.keys(result.value).length} files — ${Object.keys(result.value).join(', ')}`)
     } else {
       log.warn(`Agent "${name}" failed: ${result.reason?.message ?? result.reason}`)
     }
@@ -204,5 +214,6 @@ function printArtifactList() {
     'AGENTS.md',
     'CHANGELOG.md',
   ]
+
   for (const a of artifacts) log.dim(`  ${a}`)
 }

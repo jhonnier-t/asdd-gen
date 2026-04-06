@@ -14,6 +14,8 @@ Usage:
 
 Options:
   --dry-run        Show what would be generated, without writing files
+  --verbose-context Show real-time Phase 0 context scan logs (enabled by default)
+  --quiet-context  Hide Phase 0 per-file scan logs
   --model <name>   GitHub Models model to use (default: openai/gpt-4o)
   --token <tok>    GitHub token (overrides GITHUB_TOKEN / GH_TOKEN env)
   --output <dir>   Output directory (default: current working directory)
@@ -29,6 +31,7 @@ Auth (in order of priority):
 
 Examples:
   npx asdd-gen
+  npx asdd-gen --quiet-context
   npx asdd-gen --dry-run
   npx asdd-gen --model openai/gpt-4o-mini
   GITHUB_TOKEN=ghp_xxx npx asdd-gen
@@ -38,6 +41,8 @@ const { values } = parseArgs({
   options: {
     help:     { type: 'boolean', short: 'h', default: false },
     'dry-run':{ type: 'boolean', default: false },
+    'verbose-context': { type: 'boolean', default: true },
+    'quiet-context': { type: 'boolean', default: false },
     model:    { type: 'string',  default: 'openai/gpt-4o' },
     token:    { type: 'string' },
     output:   { type: 'string',  default: process.cwd() },

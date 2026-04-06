@@ -28,6 +28,8 @@ export async function writeGithubFolder(outputDir, files) {
   for (const [key, content] of Object.entries(files)) {
     if (!content || typeof content !== 'string') continue
 
+    const normalizedContent = normalizeGeneratedContent(content)
+
     let fullPath
     let displayPath
 
@@ -46,7 +48,7 @@ export async function writeGithubFolder(outputDir, files) {
     mkdirSync(dirname(fullPath), { recursive: true })
 
     // Write file (overwrite if exists — re-generation is intentional)
-    writeFileSync(fullPath, ensureTrailingNewline(content), 'utf8')
+    writeFileSync(fullPath, ensureTrailingNewline(normalizedContent), 'utf8')
 
     written.push(displayPath)
   }
@@ -61,4 +63,20 @@ export async function writeGithubFolder(outputDir, files) {
  */
 function ensureTrailingNewline(content) {
   return content.endsWith('\n') ? content : content + '\n'
+}
+
+/**
+ * Removes wrapper markdown fences occasionally returned by LLMs.
+ * Keeps inner file content untouched.
+ * @param {string} content
+ * @returns {string}
+ */
+function normalizeGeneratedContent(content) {
+  const trimmed = content.trim()
+
+  // Matches full-document fences like ```md ... ``` or ``` ... ```
+  const match = trimmed.match(/^```(?:[a-zA-Z0-9_-]+)?\n([\s\S]*?)\n```$/)
+  if (!match) return content
+
+  return match[1]
 }
