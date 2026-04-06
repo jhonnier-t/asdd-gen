@@ -49,9 +49,19 @@ export async function orchestrate(opts) {
   }
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
-  log.info('Resolving GitHub token...')
-  const token = await resolveToken(opts.token)
-  log.success('GitHub token resolved\n')
+  log.phase('⚙️ ', 'Resolving GitHub token...')
+  let token
+  try {
+    token = await resolveToken(opts.token)
+    log.success('✓ GitHub token resolved\n')
+  } catch (err) {
+    console.log('')
+    log.error('Failed to resolve GitHub token')
+    console.log('')
+    console.log(err.message)
+    console.log('')
+    process.exit(1)
+  }
 
   const agentArgs = { token, model, ctx }
   /** @type {Record<string, string>} collected file contents across all phases */
