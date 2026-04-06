@@ -81,17 +81,17 @@ export async function orchestrate(opts) {
   }
 
   const agentArgs = { token, model, ctx }
-  /** @type {Record<string, string>} collected file contents across all phases */
-  const files = {}
+  /** @type {Set<string>} written file paths */
+  const writtenPathsSet = new Set()
 
   log.info('Generating ASDD structure files...')
+  log.dim('  • files are written incrementally as each agent finishes')
   console.log('')
 
   log.info('Creating core specification files...')
 
   const specFiles = await runSpecAgent(agentArgs)
-  Object.assign(files, specFiles)
-  log.agent('spec', `created ${Object.keys(specFiles).length} files — ${Object.keys(specFiles).join(', ')}`)
+  await processAgentResult('spec', { status: 'fulfilled', value: specFiles }, outputDir, writtenPathsSet)
   console.log('')
 
   log.info('Creating implementation and test agent files...')
@@ -103,8 +103,9 @@ export async function orchestrate(opts) {
     { name: 'frontend', run: () => runFrontendAgent(agentArgs) },
   ]
 
-  const phase2Results = await runTasksWithConcurrency(phase2Tasks, maxAgentConcurrency)
-  processPhaseResults(phase2Results, phase2Tasks.map((task) => task.name), files)
+  await runTasksWithConcurrency(phase2Tasks, maxAgentConcurrency, async (index, result) => {
+    await processAgentResult(phase2Tasks[index].name, result, outputDir, writtenPathsSet)
+  })
   console.log('')
 
   log.info('Creating documentation, orchestration, and tooling files...')
@@ -118,13 +119,12 @@ export async function orchestrate(opts) {
     { name: 'vscode-config', run: () => runVscodeConfigAgent(agentArgs) },
   ]
 
-  const phase3Results = await runTasksWithConcurrency(phase3Tasks, maxAgentConcurrency)
-
-  processPhaseResults(phase3Results, phase3Tasks.map((task) => task.name), files)
+  await runTasksWithConcurrency(phase3Tasks, maxAgentConcurrency, async (index, result) => {
+    await processAgentResult(phase3Tasks[index].name, result, outputDir, writtenPathsSet)
+  })
   console.log('')
 
-  log.info('Writing output files...')
-  const writtenPaths = await writeGithubFolder(outputDir, files)
+  const writtenPaths = [...writtenPathsSet]
   console.log('')
   log.success(`Generated ${writtenPaths.length} files:`)
   for (const p of writtenPaths) log.dim(`  ${p}`)
@@ -137,21 +137,20 @@ export async function orchestrate(opts) {
 // ---------------------------------------------------------------------------
 
 /**
- * Processes Promise.allSettled results, merges fulfilled files, warns on errors.
- * @param {PromiseSettledResult[]} results
- * @param {string[]} names - Agent names in same order as results
- * @param {Record<string,string>} files - Accumulator
+ * Processes a single agent result and writes files immediately when fulfilled.
+ * @param {string} name
+ * @param {PromiseSettledResult<Record<string,string>>} result
+ * @param {string} outputDir
+ * @param {Set<string>} writtenPathsSet
  */
-function processPhaseResults(results, names, files) {
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i]
-    const name = names[i]
-    if (result.status === 'fulfilled') {
-      Object.assign(files, result.value)
-      log.agent(name, `created ${Object.keys(result.value).length} files — ${Object.keys(result.value).join(', ')}`)
-    } else {
-      log.warn(`Agent "${name}" failed: ${result.reason?.message ?? result.reason}`)
-    }
+async function processAgentResult(name, result, outputDir, writtenPathsSet) {
+  if (result.status === 'fulfilled') {
+    const written = await writeGithubFolder(outputDir, result.value)
+    for (const p of written) writtenPathsSet.add(p)
+    log.agent(name, `created ${Object.keys(result.value).length} files — ${Object.keys(result.value).join(', ')}`)
+    for (const p of written) log.dim(`    wrote: ${p}`)
+  } else {
+    log.warn(`Agent "${name}" failed: ${result.reason?.message ?? result.reason}`)
   }
 }
 
@@ -159,9 +158,10 @@ function processPhaseResults(results, names, files) {
  * Runs async tasks with bounded concurrency and returns Promise.allSettled-compatible results.
  * @param {{name: string, run: () => Promise<Record<string, string>>}[]} tasks
  * @param {number} concurrency
+ * @param {(index: number, result: PromiseSettledResult<Record<string, string>>) => Promise<void>|void} [onSettled]
  * @returns {Promise<PromiseSettledResult<Record<string, string>>[]>}
  */
-async function runTasksWithConcurrency(tasks, concurrency) {
+async function runTasksWithConcurrency(tasks, concurrency, onSettled) {
   const results = new Array(tasks.length)
   let nextIndex = 0
 
@@ -176,6 +176,14 @@ async function runTasksWithConcurrency(tasks, concurrency) {
         results[index] = { status: 'fulfilled', value }
       } catch (reason) {
         results[index] = { status: 'rejected', reason }
+      }
+
+      if (onSettled) {
+        try {
+          await onSettled(index, results[index])
+        } catch (callbackError) {
+          log.warn(`Post-process for agent "${tasks[index].name}" failed: ${callbackError?.message ?? callbackError}`)
+        }
       }
     }
   }
