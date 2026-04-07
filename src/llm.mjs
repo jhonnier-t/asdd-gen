@@ -3,6 +3,17 @@
 const GITHUB_MODELS_ENDPOINT = 'https://models.inference.ai.azure.com'
 const MAX_TRANSIENT_RETRIES = 4
 
+// Module-level cache: token → available models list
+// Fetched once per CLI invocation, reused for all subsequent chat() calls.
+const _availableModelsCache = new Map()
+
+async function getAvailableModels(token) {
+  if (_availableModelsCache.has(token)) return _availableModelsCache.get(token)
+  const models = await fetchAvailableModels(token)
+  _availableModelsCache.set(token, models)
+  return models
+}
+
 async function fetchAvailableModels(token) {
   try {
     const response = await fetch(`${GITHUB_MODELS_ENDPOINT}/models`, {
@@ -233,7 +244,7 @@ function buildModelTryOrder(requestedModel, resolvedModel, availableModels) {
  */
 export async function chat({ token, model, messages, maxTokens = 4096, temperature = 0.2 }) {
   const url = `${GITHUB_MODELS_ENDPOINT}/chat/completions`
-  const availableModels = await fetchAvailableModels(token)
+  const availableModels = await getAvailableModels(token)
   const resolvedModel = resolveModelForAccount(model, availableModels)
   const displayModel = sanitizeModelForDisplay(model)
   const modelsToTry = buildModelTryOrder(model, resolvedModel, availableModels)
@@ -424,20 +435,67 @@ export function buildContextBlock(ctx) {
     ? ctx.techStack.join(', ')
     : 'not yet determined'
 
+  const { architecturePatterns } = ctx
+
+  // Architecture section: detected patterns + principles
+  const patternSection = architecturePatterns
+    ? buildArchitectureSection(architecturePatterns)
+    : `### Design Principles\n${['SOLID', 'DRY', 'KISS', 'YAGNI', 'Separation of Concerns'].map((p) => `- ${p}`).join('\n')}`
+
+  // Documentation section: concat all read markdown docs (up to limit)
+  const MAX_TOTAL_DOC_CHARS = 12000
+  let docsSection = ''
+  if (ctx.docs && ctx.docs.length > 0) {
+    const parts = []
+    let totalChars = 0
+    for (const doc of ctx.docs) {
+      if (totalChars >= MAX_TOTAL_DOC_CHARS) break
+      const section = `### ${doc.path}\n${doc.content}`
+      parts.push(section)
+      totalChars += section.length
+    }
+    docsSection = `\n### Project documentation\n${parts.join('\n\n---\n\n')}`
+  }
+
+  // Directory structure
+  const dirSection = ctx.directoryTree
+    ? `\n### Directory structure\n\`\`\`\n${ctx.directoryTree}\n\`\`\``
+    : ''
+
   return `## Project Context
 
 **Project name**: ${ctx.projectName}
+**Version**: ${ctx.version || 'N/A'}
 **Description**: ${ctx.description || '(none)'}
-**Tech stack detected**: ${techList}
+**Tech stack**: ${techList}
 
-### File tree (partial)
-\`\`\`
-${ctx.fileTree || '(empty project)'}
-\`\`\`
-${
-  ctx.readme
-    ? `\n### README excerpt\n\`\`\`\n${ctx.readme}\n\`\`\``
-    : ''
-}
+${patternSection}
+${docsSection}
+${dirSection}
 `
+}
+
+function buildArchitectureSection(architecturePatterns) {
+  const { detected, principles, isDefault } = architecturePatterns
+
+  const lines = ['### Architecture & Design Principles']
+
+  if (!isDefault && detected.length > 0) {
+    lines.push('')
+    lines.push('**Detected patterns in this project:**')
+    for (const p of detected) lines.push(`- ${p}`)
+  }
+
+  lines.push('')
+  lines.push('**Principles to follow:**')
+  for (const p of principles) lines.push(`- ${p}`)
+
+  if (isDefault) {
+    lines.push('')
+    lines.push('> No specific architecture patterns were detected in the project documentation.')
+    lines.push('> Apply the listed base principles. If the project has an existing pattern,')
+    lines.push('> detect it from the source code and follow it consistently.')
+  }
+
+  return lines.join('\n')
 }

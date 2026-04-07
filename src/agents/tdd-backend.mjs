@@ -1,8 +1,11 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
 const SYSTEM = `You are a senior backend engineer and TDD practitioner.
-Your task is to produce a GitHub Copilot agent definition file that guides AI agents
-to write backend tests BEFORE writing implementation code.
+Produce a GitHub Copilot agent definition that guides AI agents to write backend tests
+BEFORE any implementation code is written (Red phase of TDD).
+
+You MUST detect the project's testing framework, test conventions, and architecture patterns
+from the context, then generate an agent definition that enforces those specific patterns.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose.`
 
@@ -13,6 +16,11 @@ Output format: Pure markdown with YAML frontmatter. No extra prose.`
  */
 export async function runTddBackendAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const stack = ctx.techStack.join(', ') || 'generic'
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `The project uses: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific patterns detected — use Clean Architecture with SOLID as defaults.'
 
   const agentContent = await chat({
     token,
@@ -23,28 +31,33 @@ export async function runTddBackendAgent({ token, model, ctx }) {
         role: 'user',
         content: `${contextBlock}
 
-Generate \`agents/tdd-backend.agent.md\` — a GitHub Copilot agent for backend TDD.
+Generate \`agents/tdd-backend.agent.md\` — a GitHub Copilot agent for backend TDD (Red phase).
 
-This agent is invoked with @tdd-backend to write tests BEFORE backend implementation.
+Architecture context: ${detectedPatterns}
+Principles: ${archPrinciples}
+Tech stack: ${stack}
+
+This agent is invoked with @tdd-backend to write FAILING tests before any implementation.
 It must:
 
-1. Read the feature spec (from .github/agents/spec.agent.md output)
-2. Identify all backend units to test: services, controllers, repositories, use-cases, utilities
-3. Write failing tests first (Red phase) following the test framework used in this stack
-4. Group tests logically: unit tests, integration tests, contract tests
-5. For each test file, produce:
-   - Test file path following the project's convention
-   - Import structure
-   - Test suite structure (describe blocks)
-   - Individual test cases with clear "arrange / act / assert" pattern
-   - Mocking strategy for external dependencies
-6. Include test coverage requirements (minimum coverage thresholds per module)
-7. Define test data factories / fixtures / builders
+1. Read the approved feature spec from .github/specs/
+2. Read .github/instructions/testing.instructions.md for testing conventions
+3. Identify every backend unit that will be needed:
+   - Based on the architecture (${ctx.architecturePatterns?.detected?.join(', ') || 'layered'}),
+     identify the layers and classes/functions to test
+   - Services/use-cases, repositories, domain entities, API handlers
+4. Write tests using AAA pattern (Arrange / Act / Assert):
+   - One describe block per module/class
+   - One it/test block per behavior (not per method)
+   - Tests must FAIL before implementation — verify this
+5. Cover for each unit: happy path, validation error, not-found, unauthorized
+6. Mock all external dependencies at the correct boundary
+7. Define test data factories for test setup
+8. NEVER write implementation code
 
-Tech stack context: ${ctx.techStack.join(', ') || 'generic'}
+Tech stack test frameworks: ${stack} (use appropriate framework: Jest/Vitest/pytest/JUnit etc.)
 
-Consider test frameworks appropriate for this stack (Jest, Vitest, pytest, JUnit, etc.).
-Include YAML frontmatter with: description, tools (fileSystem, codebase), model suggestion.
+Include YAML frontmatter with: description, tools (fileSystem, codebase).
 `,
       },
     ],
@@ -59,16 +72,18 @@ Include YAML frontmatter with: description, tools (fileSystem, codebase), model 
         role: 'user',
         content: `${contextBlock}
 
-Generate \`prompts/02-tdd-backend.prompt.md\` — a GitHub Copilot prompt file.
+Generate \`prompts/02-tdd-backend.prompt.md\` — a reusable TDD prompt for backend tests.
 
-This is a reusable prompt that a developer runs to generate backend tests for a feature.
-It must:
-- Accept a feature spec as input context
-- Output complete, runnable test files following TDD (Red-Green-Refactor)
-- Be structured with clear variable placeholders: {{feature_name}}, {{module_path}}
-- Include instructions for each test layer (unit / integration / e2e)
+Architecture: ${detectedPatterns}
 
-Use YAML frontmatter with mode: ask and applyTo targeting test files.
+Structure with:
+- Variables: {{spec_file}}, {{module_path}}, {{layer}}
+- Test coverage checklist per architecture layer
+- Mocking strategy for external dependencies
+- "Tests must fail" verification step
+- Output: list of test files with paths and coverage targets
+
+Use YAML frontmatter with mode: agent.
 `,
       },
     ],

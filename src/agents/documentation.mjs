@@ -1,18 +1,17 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
-const SYSTEM = `You are a technical writer and documentation engineer specializing in
-developer documentation, API references, and architecture decision records (ADRs).
-Produce a GitHub Copilot agent that auto-generates comprehensive project documentation.
+const SYSTEM = `You are a technical writer and documentation engineer.
+Produce a GitHub Copilot agent that auto-generates developer documentation
+aligned with the project's architecture patterns and coding conventions.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose.`
 
-/**
- * Generates the documentation agent file.
- * @param {object} params
- * @returns {Promise<{ 'agents/documentation.agent.md': string, 'prompts/06-documentation.prompt.md': string }>}
- */
 export async function runDocumentationAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const stack = ctx.techStack.join(', ') || 'generic'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `The project uses: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific patterns detected — document using layered architecture as baseline.'
 
   const agentContent = await chat({
     token,
@@ -25,24 +24,29 @@ export async function runDocumentationAgent({ token, model, ctx }) {
 
 Generate \`agents/documentation.agent.md\` — a GitHub Copilot agent for documentation.
 
-This agent is invoked with @docs to auto-generate or update documentation after a feature is implemented.
+Architecture context: ${detectedPatterns}
+Tech stack: ${stack}
+
+This agent is invoked with @documentation after a feature is implemented.
 It must:
 
-1. Read the feature spec, implemented code, and existing documentation
-2. Generate or update the following documentation artifacts:
-   - **README.md updates**: new sections for the feature
-   - **API Reference**: endpoint documentation (path, method, request, response, errors, auth)
-   - **Component documentation**: props, usage examples, accessibility notes
-   - **Architecture Decision Record (ADR)**: if architectural changes were introduced
-   - **Changelog entry**: following Keep a Changelog format
-   - **Environment variables**: document any new env vars required
-   - **Deployment notes**: any migration steps, breaking changes, rollback plan
-3. Maintain consistent documentation style with the existing docs
-4. Use JSDoc / TSDoc / docstrings consistent with the codebase language
-5. Keep the README up-to-date with setup, development, and deployment instructions
-6. Link related documentation and cross-reference specs
+1. Read the feature spec, implemented source code, and existing documentation
+2. Generate or update these artifacts:
+   - **CHANGELOG.md**: Add entry under [Unreleased] following Keep a Changelog format
+   - **README.md**: Update any sections affected by the feature (setup, API, config)
+   - **Architecture Decision Record**: Create \`docs/adr/ADR-<n>-<title>.md\` if the feature
+     introduces a significant architectural or design decision
+   - **API Reference**: Document new endpoints (path, method, auth, request, response, errors)
+   - **Environment variables**: Document any new env vars in .env.example
+3. Write documentation that reflects the actual implementation — never aspirational
+4. Maintain consistent documentation style with existing docs
+5. Reference the spec ID: \"Implements FEAT-XXX\"
+6. Update the AGENTS.md catalog if new agents or capabilities were added
 
-Tech stack context: ${ctx.techStack.join(', ') || 'generic'}
+Architecture documentation rules:
+- Document WHY decisions were made, not just what was built
+- If the feature introduces a new ${ctx.architecturePatterns?.detected?.[0] || 'layer/module'},
+  add a diagram showing how it fits into the overall architecture
 
 Include YAML frontmatter with: description, tools (fileSystem, codebase).
 `,
@@ -59,15 +63,17 @@ Include YAML frontmatter with: description, tools (fileSystem, codebase).
         role: 'user',
         content: `${contextBlock}
 
-Generate \`prompts/06-documentation.prompt.md\` — a GitHub Copilot reusable prompt for documentation.
+Generate \`prompts/06-documentation.prompt.md\` — a reusable documentation prompt.
 
-Structure it with:
-- Variables: {{feature_name}}, {{changed_files}}, {{api_endpoints}}
-- Instructions to produce each documentation artifact
-- Style guidelines (tone, format, length for each doc type)
-- Checklist of documentation completeness
+Architecture: ${detectedPatterns}
 
-Use YAML frontmatter with mode: ask and applyTo targeting markdown files.
+Structure with:
+- Variables: {{spec_file}}, {{feature_name}}, {{changed_files}}
+- Documentation artifacts checklist (CHANGELOG, README, ADR, API docs, .env.example)
+- Style guide (tone: directive/imperative, format per artifact type)
+- \"Definition of Done\" for documentation: all artifacts complete, spec referenced
+
+Use YAML frontmatter with mode: agent.
 `,
       },
     ],
@@ -78,3 +84,4 @@ Use YAML frontmatter with mode: ask and applyTo targeting markdown files.
     'prompts/06-documentation.prompt.md': promptContent,
   }
 }
+

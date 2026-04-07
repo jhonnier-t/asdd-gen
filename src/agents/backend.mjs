@@ -1,9 +1,12 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
-const SYSTEM = `You are a senior backend engineer specializing in clean architecture,
-RESTful APIs, and domain-driven design.
-Produce a GitHub Copilot agent definition file that guides the implementation of
-backend features following existing tests (Green phase of TDD).
+const SYSTEM = `You are a senior backend engineer.
+Produce a GitHub Copilot agent definition that guides backend implementation
+following existing tests (TDD Green phase) and the project's architecture.
+
+You MUST analyze the project's architecture patterns and coding conventions,
+then generate instructions that enforce those specific patterns.
+If no patterns are documented, apply Clean Architecture with SOLID principles.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose.`
 
@@ -14,6 +17,11 @@ Output format: Pure markdown with YAML frontmatter. No extra prose.`
  */
 export async function runBackendAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const stack = ctx.techStack.join(', ') || 'generic'
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS, YAGNI'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `The project uses: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific patterns detected — use Clean Architecture with SOLID as defaults.'
 
   const agentContent = await chat({
     token,
@@ -26,23 +34,29 @@ export async function runBackendAgent({ token, model, ctx }) {
 
 Generate \`agents/backend.agent.md\` — a GitHub Copilot agent for backend implementation.
 
+Architecture context: ${detectedPatterns}
+Principles to enforce: ${archPrinciples}
+Tech stack: ${stack}
+
 This agent is invoked with @backend to implement code that makes failing backend tests pass.
 It must:
 
-1. Read the feature spec, TDD tests, and existing codebase structure
-2. Implement in layers, following the dependency direction of the detected architecture:
-   - **Domain layer**: entities, value objects, domain events, interfaces
-   - **Application layer**: use-cases, commands, queries, DTOs
-   - **Infrastructure layer**: repositories, external service adapters, DB migrations
-   - **API/Controller layer**: route handlers, request validation, response mapping
-3. Follow existing code patterns (naming, error handling, logging, validation)
-4. Ensure all tests turn green — DO NOT modify tests to pass
-5. Add input validation at boundaries (schema validation, sanitization)
-6. Apply security best practices (OWASP Top 10: injection, auth, exposure)
-7. Respect the database schema and migration patterns used
-8. Use dependency injection patterns consistent with the stack
+1. Read the feature spec and failing test files before writing any code
+2. Scan the existing source structure to identify the actual patterns used
+   (folder layout, naming conventions, abstractions, module organization)
+3. Implement following the ${ctx.architecturePatterns?.detected?.[0] || 'layered architecture'} pattern:
+   - Dependencies flow inward only (Infrastructure → Application → Domain)
+   - Business rules live in Domain — no framework/infra imports there
+   - Use-cases in Application coordinate domain operations
+   - Infrastructure implements domain interfaces
+4. Match existing naming conventions EXACTLY (do not invent new patterns)
+5. Make all tests go green — NEVER modify tests to pass
+6. Validate all inputs at API boundaries (schema validation, type checking)
+7. Apply OWASP Top 10: parameterized queries, sanitized inputs, auth enforcement
+8. Return domain errors as structured responses (not raw exceptions)
 
-Tech stack context: ${ctx.techStack.join(', ') || 'generic'}
+The agent definition must include specific sections for each architecture layer
+with concrete examples matching the project's tech stack (${stack}).
 
 Include YAML frontmatter with: description, tools (fileSystem, codebase, terminalLastCommand).
 `,
@@ -59,15 +73,18 @@ Include YAML frontmatter with: description, tools (fileSystem, codebase, termina
         role: 'user',
         content: `${contextBlock}
 
-Generate \`prompts/04-backend.prompt.md\` — a GitHub Copilot reusable prompt for backend implementation.
+Generate \`prompts/04-backend.prompt.md\` — a reusable prompt for backend implementation.
 
-Structure it with:
-- Variables: {{feature_name}}, {{layer}}, {{test_file_path}}
-- Instructions to implement each architectural layer
-- Security checklist the agent must verify before finishing
+Architecture: ${detectedPatterns}
+
+Structure with:
+- Variables: {{spec_file}}, {{layer}}, {{test_file_path}}
+- Per-layer implementation checklist (Domain → Application → Infrastructure → API)
+- Security checklist (OWASP items to verify before finishing)
 - Output expectations (file paths, function signatures, exports)
+- "Definition of Done" section: all tests pass, no security violations, conventions matched
 
-Use YAML frontmatter with mode: agent and applyTo targeting source files.
+Use YAML frontmatter with mode: agent.
 `,
       },
     ],

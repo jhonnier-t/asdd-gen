@@ -1,18 +1,14 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
 const SYSTEM = `You are a QA engineer specializing in behavior-driven development (BDD),
-Gherkin scenario writing, and acceptance test automation. 
+Gherkin scenario writing, and acceptance test automation.
 Produce a GitHub Copilot agent that generates Gherkin feature files and acceptance tests.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose.`
 
-/**
- * Generates the QA / Gherkin agent file.
- * @param {object} params
- * @returns {Promise<{ 'agents/qa.agent.md': string, 'prompts/07-qa-scenarios.prompt.md': string }>}
- */
 export async function runQaAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const stack = ctx.techStack.join(', ') || 'generic'
 
   const agentContent = await chat({
     token,
@@ -25,31 +21,27 @@ export async function runQaAgent({ token, model, ctx }) {
 
 Generate \`agents/qa.agent.md\` — a GitHub Copilot agent for QA and Gherkin scenarios.
 
-This agent is invoked with @qa to produce acceptance tests and Gherkin feature files
-from a feature specification.
+Tech stack: ${stack}
+
+This agent is invoked with @qa to produce acceptance tests from a feature specification.
 It must:
 
-1. Read the feature spec with its acceptance criteria
-2. Produce **Gherkin feature files** (.feature) with:
-   - Feature description and background
-   - Happy path scenarios (core positive flows)
-   - Negative / error scenarios (invalid inputs, unauthorized access, missing data)
-   - Edge case scenarios (boundary values, concurrent operations, timeouts)
-   - Performance scenarios (if relevant SLAs exist)
-3. Write **step definitions** in the language/framework used (Cucumber.js, SpecFlow, Behave, Karate)
-4. Define **test data** (fixtures, factories, seeds) for each scenario
-5. Identify **manual test cases** for scenarios not suitable for automation
-6. Produce an **exploratory testing charter** for exploratory QA sessions
-7. Link each scenario back to its acceptance criteria ID
-8. Validate coverage: every acceptance criterion must have at least one scenario
+1. Read the feature spec and its acceptance criteria
+2. Produce **Gherkin feature files** covering:
+   - Happy path scenario for each acceptance criterion
+   - Negative/error scenarios (invalid input, unauthorized, missing data)
+   - Edge cases (boundary values, empty collections, concurrent operations)
+3. Write Gherkin in business language — no implementation details in steps
+4. Use Scenario Outline + Examples for parameterized tests
+5. Tag scenarios: @smoke for critical paths, @regression for edge cases
+6. Save to \`.github/specs/scenarios/FEAT-<id>-<slug>.feature\`
+7. Every acceptance criterion must map to at least one scenario
 
 Gherkin quality rules:
-- One behavior per scenario
-- Use "Given/When/Then" strictly (not And to start)
-- Avoid implementation detail in steps (use business language)
-- Parameterize data with Scenario Outline / Examples tables
-
-Tech stack context: ${ctx.techStack.join(', ') || 'generic'}
+- Use \"Given/When/Then\" strictly (not And/But to start a step)
+- One behavior per scenario (one When per scenario)
+- Scenarios are independent — no shared mutable state between them
+- Reference spec ID in Feature docstring
 
 Include YAML frontmatter with: description, tools (fileSystem, codebase).
 `,
@@ -66,15 +58,15 @@ Include YAML frontmatter with: description, tools (fileSystem, codebase).
         role: 'user',
         content: `${contextBlock}
 
-Generate \`prompts/07-qa-scenarios.prompt.md\` — a GitHub Copilot reusable prompt for QA.
+Generate \`prompts/07-qa-scenarios.prompt.md\` — a reusable QA prompt.
 
-Structure it with:
-- Variables: {{feature_name}}, {{acceptance_criteria}}, {{actors}}
-- Instructions to produce .feature files, step definitions, and test data
-- Scenario coverage matrix (happy path / negative / edge / performance)
-- Quality checklist for Gherkin scenarios
+Structure with:
+- Variables: {{spec_file}}, {{feat_id}}, {{slug}}
+- Scenario coverage matrix (happy path / negative / edge / boundary)
+- Gherkin quality checklist
+- Output: .feature file path with all scenarios
 
-Use YAML frontmatter with mode: ask.
+Use YAML frontmatter with mode: agent.
 `,
       },
     ],
@@ -85,3 +77,4 @@ Use YAML frontmatter with mode: ask.
     'prompts/07-qa-scenarios.prompt.md': promptContent,
   }
 }
+

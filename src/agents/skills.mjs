@@ -1,35 +1,22 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
 const SYSTEM = `You are a GitHub Copilot expert and senior software architect.
-Generate VS Code / GitHub Copilot instruction files (.instructions.md) — also called "skills" —
-that teach AI coding agents the specific conventions, patterns, and best practices
-for working with this project's tech stack.
+Generate VS Code / GitHub Copilot instruction files (.instructions.md) that teach AI agents
+the specific conventions, patterns, and best practices for this project.
 
-These files use YAML frontmatter with an applyTo glob pattern that scopes
-the instructions to matching files.
+IMPORTANT: You must detect and enforce the architecture patterns documented in the project.
+If no specific patterns are documented, use SOLID, DRY, KISS, YAGNI, and Separation of Concerns
+as defaults and state them explicitly.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose outside the file content.`
 
-/**
- * Generates domain-specific Copilot instruction files (skills) and AGENTS.md.
- *
- * Produces under .github/instructions/:
- *   - general.instructions.md      — global rules (always applied)
- *   - backend.instructions.md      — backend-specific conventions
- *   - frontend.instructions.md     — frontend/component conventions
- *   - testing.instructions.md      — testing rules and patterns
- *   - security.instructions.md     — security-first coding rules
- *   - git.instructions.md          — commit, branch, and PR conventions
- *
- * And at root:
- *   - ROOT:AGENTS.md               — AI agent catalog (human-readable)
- *
- * @param {object} params
- * @returns {Promise<Record<string, string>>}
- */
 export async function runSkillsAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
   const stack = ctx.techStack.join(', ') || 'generic'
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS, YAGNI, Separation of Concerns'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `Detected architecture patterns: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific architecture detected \u2014 enforce SOLID, DRY, KISS, YAGNI, Separation of Concerns.'
 
   const [general, backend, frontend, testing, security, specSkill, agentsMd] = await Promise.all([
     // general.instructions.md — applies to all files
@@ -42,21 +29,25 @@ export async function runSkillsAgent({ token, model, ctx }) {
           role: 'user',
           content: `${contextBlock}
 
-Generate \`instructions/general.instructions.md\` — global Copilot instructions that apply to ALL files.
+Generate \`instructions/general.instructions.md\` \u2014 global Copilot instructions for ALL files.
 
 YAML frontmatter must include:
   applyTo: "**"
 
+Architecture context: ${detectedPatterns}
+
 Content must cover:
-1. **Project purpose** — 2-3 sentences on what this project does and its domain
-2. **Language and formatting rules** — enforced by linter/formatter in this stack
-3. **Naming conventions** — variables, functions, classes, files, folders
-4. **Error handling patterns** — how errors are handled/propagated (based on stack: ${stack})
-5. **Logging conventions** — log levels, structured logging format
-6. **Comment style** — when to comment (why, not what), JSDoc/TSDoc/docstring rules
-7. **Import/module organization** — import ordering, barrel files, circular dependency rules
-8. **Forbidden patterns** — specific anti-patterns to never use in this project
-9. **ASDD workflow reminder** — always follow spec → TDD → implement → docs → QA sequence
+1. **Project purpose** \u2014 2-3 sentences on what this project does and its domain
+2. **Architecture principles** \u2014 For each of [${archPrinciples}], write 2-3 specific,
+   actionable rules for THIS project. Never copy-paste generic definitions.
+   If patterns were detected, describe the specific layering rules to follow.
+3. **Language and formatting rules** \u2014 enforced by linter/formatter in this stack (${stack})
+4. **Naming conventions** \u2014 variables, functions, classes, files, folders with examples
+5. **Error handling** \u2014 how errors are handled/propagated in this stack
+6. **Comment style** \u2014 when to comment (why not what), JSDoc/TSDoc/docstring rules
+7. **Import organization** \u2014 import ordering, circular dependency rules
+8. **Forbidden patterns** \u2014 specific anti-patterns never to use in this project
+9. **ASDD workflow reminder** \u2014 spec \u2192 TDD \u2192 implement \u2192 docs \u2192 QA (always in this order)
 `,
         },
       ],
@@ -76,16 +67,21 @@ Generate \`instructions/backend.instructions.md\` — Copilot instructions for b
 
 YAML frontmatter: applyTo targeting backend source dirs (src/**, api/**, server/**, lib/**)
 
+Architecture context: ${detectedPatterns}
+Principles: ${archPrinciples}
+
 Content (tailored to stack: ${stack}):
-1. **Architecture pattern** — layered architecture rules (domain/application/infra/api)
-2. **API design** — REST conventions (HTTP verbs, status codes, URL naming, versioning)
-3. **Request validation** — always validate at boundaries, schema libraries to use
+1. **Architecture pattern** — Describe the specific layering rules for this project.
+   If ${ctx.architecturePatterns?.detected?.[0] || 'Clean Architecture'} is used,
+   describe the dependency rules and what belongs in each layer
+2. **API design** — REST conventions: HTTP verbs, status codes, URL naming, versioning, pagination
+3. **Request validation** — validate ALL inputs at boundaries, schema libraries to use for ${stack}
 4. **Database patterns** — query patterns, transaction handling, N+1 prevention
-5. **Authentication/Authorization** — middleware patterns, JWT/session handling
-6. **Dependency injection** — how dependencies are wired in this stack
-7. **Background jobs** — queue patterns and idempotency requirements
+5. **Authentication/Authorization** — middleware patterns, JWT/session handling in ${stack}
+6. **Dependency injection** — how dependencies are wired in this specific stack
+7. **Error handling** — domain errors vs infrastructure errors, error response format
 8. **Service boundaries** — what belongs in service vs controller vs repository
-9. **Security rules** — input sanitization, parameterized queries, secret handling
+9. **Security rules** — parameterized queries, input sanitization, secret handling (OWASP)
 `,
         },
       ],

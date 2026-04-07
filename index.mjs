@@ -6,23 +6,29 @@ import { log } from './src/logger.mjs'
 const HELP = `
 asdd-gen — Agentic Spec Driven Development generator
 
-Reads your project context and generates a .github/ASDD structure
-with Copilot agents, instructions and prompts using GitHub Models API.
+Generates a complete .github/ASDD structure with Copilot agents, instruction files,
+prompts, git hooks, and VS Code config.
+
+Two modes:
+  Static mode  (no token)  — instant, generic, language-agnostic structure
+  AI mode      (with token) — project-specific content generated via GitHub Models API
 
 Usage:
   npx asdd-gen [options]
 
 Options:
-  --dry-run        Show what would be generated, without writing files
-  --verbose-context Show real-time Phase 0 context scan logs (enabled by default)
-  --quiet-context  Hide Phase 0 per-file scan logs
-  --model <name>   GitHub Models model to use (default: openai/gpt-4o)
-  --token <tok>    GitHub token (overrides GITHUB_TOKEN / GH_TOKEN env)
-  --output <dir>   Output directory (default: current working directory)
-  -y, --yes        Skip confirmation prompts
-  -h, --help       Show this help message
+  --dry-run         Show what would be generated, without writing files
+  --verbose-context Show per-file context scan logs (enabled by default)
+  --quiet-context   Hide per-file context scan logs
+  --model <name>    GitHub Models model to use (default: openai/gpt-4o)
+                    Only relevant in AI mode
+  --token <tok>     GitHub token — triggers AI mode
+                    (also reads GITHUB_TOKEN / GH_TOKEN env vars)
+  --output <dir>    Output directory (default: current working directory)
+  -y, --yes         Skip confirmation prompts
+  -h, --help        Show this help message
 
-Auth (in order of priority):
+Auth for AI mode (in order of priority):
   1. --token flag
   2. GITHUB_TOKEN environment variable
   3. GH_TOKEN environment variable
@@ -30,11 +36,19 @@ Auth (in order of priority):
   5. OAuth device flow (opens github.com/login/device)
 
 Examples:
+  # Static mode — no token, instant generic structure
   npx asdd-gen
-  npx asdd-gen --quiet-context
-  npx asdd-gen --dry-run
-  npx asdd-gen --model openai/gpt-4o-mini
+
+  # AI mode — project-specific content generated via GitHub Models
+  npx asdd-gen --token ghp_xxx
   GITHUB_TOKEN=ghp_xxx npx asdd-gen
+
+  # AI mode with a different model
+  npx asdd-gen --token ghp_xxx --model openai/gpt-4o-mini
+
+  # Preview without writing files
+  npx asdd-gen --dry-run
+  npx asdd-gen --token ghp_xxx --dry-run --quiet-context
 `
 
 const { values } = parseArgs({

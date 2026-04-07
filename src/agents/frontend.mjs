@@ -1,9 +1,11 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
-const SYSTEM = `You are a senior frontend engineer specializing in component-driven
-development, performance optimization, and accessibility.
-Produce a GitHub Copilot agent definition file that guides the implementation of
-UI features following existing tests (Green phase of TDD).
+const SYSTEM = `You are a senior frontend engineer.
+Produce a GitHub Copilot agent definition that guides frontend UI implementation
+following existing tests (TDD Green phase) and the project's component patterns.
+
+Detect the component architecture, styling system, and state management patterns from
+the project context. Generate instructions that enforce those specific patterns.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose.`
 
@@ -14,6 +16,11 @@ Output format: Pure markdown with YAML frontmatter. No extra prose.`
  */
 export async function runFrontendAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const stack = ctx.techStack.join(', ') || 'generic'
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `The project uses: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific patterns detected — use component-driven design with SOLID as defaults.'
 
   const agentContent = await chat({
     token,
@@ -26,25 +33,29 @@ export async function runFrontendAgent({ token, model, ctx }) {
 
 Generate \`agents/frontend.agent.md\` — a GitHub Copilot agent for frontend implementation.
 
-This agent is invoked with @frontend to implement UI code that makes failing frontend tests pass.
+Architecture context: ${detectedPatterns}
+Principles: ${archPrinciples}
+Tech stack: ${stack}
+
+This agent implements UI code to make failing frontend tests pass.
 It must:
 
-1. Read the feature spec, UI/UX requirements, and failing TDD tests
-2. Implement components following the design system / UI library in use
-3. Layer the implementation:
-   - **Presentational components**: stateless, prop-driven, fully accessible
-   - **Container/Smart components**: state management, data fetching, side effects
-   - **Pages/Routes**: route-level components, layout integration, data loading
-   - **Hooks**: reusable stateful logic extracted from components
-   - **Stores**: state management slices/stores for shared state
-4. Follow existing component patterns and folder conventions
-5. Ensure all tests turn green — DO NOT modify tests to pass
-6. Validate accessibility (WCAG 2.1 AA): semantic HTML, ARIA labels, keyboard nav, focus trap
-7. Apply performance patterns: code splitting, lazy loading, memoization where appropriate
-8. Handle loading, error, and empty states in every component
-9. Use responsive design patterns consistent with the stack
+1. Read the feature spec and failing test files before writing any code
+2. Scan the existing component structure to identify patterns:
+   - Component naming, folder layout, barrel exports
+   - Styling approach (CSS modules, Tailwind, styled-components, etc.)
+   - State management (local useState, context, Zustand, Redux, etc.)
+   - Data fetching (React Query, SWR, useFetch, direct fetch, etc.)
+3. Implement following Single Responsibility: one component = one job
+4. Make all tests pass — NEVER modify tests to pass
+5. Handle ALL 3 async states: loading (skeleton/spinner), error (message + retry), success
+6. Handle empty states for lists/collections
+7. Accessibility (WCAG 2.1 AA): semantic HTML, ARIA labels, keyboard navigation, focus management
+8. No business logic in components — extract to hooks/services
+9. Match existing file structure and naming exactly
 
-Tech stack context: ${ctx.techStack.join(', ') || 'generic'}
+The agent definition must include a component implementation checklist and
+specific accessibility checks for this stack (${stack}).
 
 Include YAML frontmatter with: description, tools (fileSystem, codebase).
 `,
@@ -61,16 +72,17 @@ Include YAML frontmatter with: description, tools (fileSystem, codebase).
         role: 'user',
         content: `${contextBlock}
 
-Generate \`prompts/05-frontend.prompt.md\` — a GitHub Copilot reusable prompt for frontend implementation.
+Generate \`prompts/05-frontend.prompt.md\` — a reusable prompt for frontend implementation.
 
-Structure it with:
-- Variables: {{component_name}}, {{feature_name}}, {{design_system_tokens}}
-- Instructions for component hierarchy (atomic design or equivalent)
-- Accessibility checklist
-- Performance optimization checklist
-- File output expectations (component file, styles, stories, index re-exports)
+Architecture: ${detectedPatterns}
 
-Use YAML frontmatter with mode: agent and applyTo targeting component files.
+Structure with:
+- Variables: {{spec_file}}, {{component_name}}, {{test_file_path}}
+- Component implementation checklist (render, state, a11y, async states, empty state)
+- Styling conventions for this project's stack
+- \"Definition of Done\": all tests pass, a11y OK, responsive, no console errors
+
+Use YAML frontmatter with mode: agent.
 `,
       },
     ],

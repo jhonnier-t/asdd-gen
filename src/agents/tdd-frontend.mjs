@@ -1,8 +1,10 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
-const SYSTEM = `You are a senior frontend engineer and TDD practitioner specializing in
-component-driven development, accessibility, and visual regression testing.
-Produce a GitHub Copilot agent definition file for frontend TDD.
+const SYSTEM = `You are a senior frontend engineer and TDD practitioner.
+Produce a GitHub Copilot agent definition for frontend TDD (Red phase).
+
+Detect the project's component patterns, testing framework, and styling system from context.
+Generate instructions that enforce those specific patterns.
 
 Output format: Pure markdown with YAML frontmatter. No extra prose.`
 
@@ -13,6 +15,11 @@ Output format: Pure markdown with YAML frontmatter. No extra prose.`
  */
 export async function runTddFrontendAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const stack = ctx.techStack.join(', ') || 'generic'
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `The project uses: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific patterns detected — use component-driven design with SOLID as defaults.'
 
   const agentContent = await chat({
     token,
@@ -23,27 +30,29 @@ export async function runTddFrontendAgent({ token, model, ctx }) {
         role: 'user',
         content: `${contextBlock}
 
-Generate \`agents/tdd-frontend.agent.md\` — a GitHub Copilot agent for frontend TDD.
+Generate \`agents/tdd-frontend.agent.md\` — a GitHub Copilot agent for frontend TDD (Red phase).
 
-This agent is invoked with @tdd-frontend to write component/UI tests BEFORE implementation.
+Architecture context: ${detectedPatterns}
+Principles: ${archPrinciples}
+Tech stack: ${stack}
+
+This agent writes FAILING frontend tests before any UI is implemented.
 It must:
 
-1. Read the feature spec and UI/UX requirements
-2. Identify all frontend units: components, pages, hooks, stores, utils, services
-3. Write failing tests first (Red phase) for:
-   - **Component tests**: render, props, events, state, snapshots
-   - **Hook tests**: state transitions, side effects
-   - **Integration tests**: user flows across multiple components
-   - **Accessibility tests**: ARIA, keyboard navigation, screen-reader support
-   - **Visual regression tests**: if Playwright/Storybook is available
-4. Define mock strategy for API calls, router, i18n, auth context
-5. Specify test IDs / data-testid conventions
-6. Include testing-library best practices (query by role, not by class)
+1. Read the approved feature spec from .github/specs/
+2. Read .github/instructions/testing.instructions.md and .github/instructions/frontend.instructions.md
+3. Map each UI acceptance criterion to one or more component tests
+4. Write tests using accessible selectors (getByRole, getByLabelText) — not data-testid first
+5. Cover all 3 async states: loading, error, success/populated
+6. Cover: form validation errors, empty states, accessibility (ARIA, keyboard nav)
+7. Mock all API calls at the network boundary
+8. Write tests that FAIL before implementation — verify this
+9. NEVER write any implementation code
 
-Tech stack context: ${ctx.techStack.join(', ') || 'generic'}
+Test frameworks for this stack (${stack}):
+Choose from: Vitest + Testing Library, Jest + RTL, Playwright, Cypress, Storybook.
 
-Consider testing tools: Vitest, Jest, Testing Library, Playwright, Cypress, Storybook.
-Include YAML frontmatter with: description, tools, model suggestion.
+Include YAML frontmatter with: description, tools (fileSystem, codebase).
 `,
       },
     ],
@@ -58,16 +67,18 @@ Include YAML frontmatter with: description, tools, model suggestion.
         role: 'user',
         content: `${contextBlock}
 
-Generate \`prompts/03-tdd-frontend.prompt.md\` — a GitHub Copilot reusable prompt.
+Generate \`prompts/03-tdd-frontend.prompt.md\` — a reusable TDD prompt for frontend tests.
 
-This prompt is used to generate frontend test files for a UI feature.
-Structure it with:
-- Context variables: {{component_name}}, {{feature_description}}, {{props_interface}}
-- Instructions to produce test files per layer (component / hook / e2e)
-- Guidelines for accessibility and responsive behavior testing
-- Output format expectations
+Architecture: ${detectedPatterns}
 
-Use YAML frontmatter with mode: ask and applyTo targeting test files.
+Structure with:
+- Variables: {{spec_file}}, {{component_name}}, {{feature_name}}
+- Test coverage checklist (render, interaction, a11y, async states)
+- Mock strategy for API/router/auth context
+- \"Tests must fail\" verification step
+- Output: list of test files with paths
+
+Use YAML frontmatter with mode: agent.
 `,
       },
     ],

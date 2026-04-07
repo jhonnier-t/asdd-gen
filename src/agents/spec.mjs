@@ -1,27 +1,26 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
 const SYSTEM = `You are a senior software architect specialized in Spec Driven Development.
-Your task is to analyze a project and produce specification documents and agent definitions
-that will serve as the foundation for all subsequent AI agents (TDD, backend, frontend,
-documentation, and QA agents).
+Your task is to analyze a project's documentation and produce specification documents
+and agent definitions that serve as the foundation for all subsequent AI agents.
 
-The ASDD pipeline always starts with a spec file in .github/specs/.
-No implementation, no tests, no docs are generated without a spec.
+You MUST detect and respect the architecture patterns already established in the project.
+If no patterns are documented, apply SOLID, DRY, KISS, and YAGNI as defaults.
 
 Output format: Pure markdown. No prose intro or closing remarks outside the document.`
 
 /**
  * Generates the project specification scaffold.
- * Produces three files:
- *   - copilot-instructions.md         — global AI context + ASDD flow description
- *   - agents/spec.agent.md            — @spec agent that creates specs in .github/specs/
- *   - specs/SPEC-TEMPLATE.md          — empty spec template developers copy per feature
  *
  * @param {object} params
  * @returns {Promise<Record<string, string>>}
  */
 export async function runSpecAgent({ token, model, ctx }) {
   const contextBlock = buildContextBlock(ctx)
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS, YAGNI'
+  const detectedPatterns = ctx.architecturePatterns?.detected?.length
+    ? `Detected architecture patterns: ${ctx.architecturePatterns.detected.join(', ')}.`
+    : 'No specific architecture patterns detected — use SOLID, DRY, KISS, YAGNI as defaults.'
 
   const [instructionsContent, agentContent] = await Promise.all([
     // ---------- copilot-instructions.md ----------
@@ -35,19 +34,22 @@ export async function runSpecAgent({ token, model, ctx }) {
           content: `${contextBlock}
 
 Generate a \`copilot-instructions.md\` file for this project.
-This file is the main instruction file loaded by GitHub Copilot for every interaction.
+This is the main instruction file loaded by GitHub Copilot for every interaction.
 
-It must include:
-1. **Project overview** — What this project does, its purpose and domain
-2. **Architecture** — High-level architecture description (layers, services, modules)
-3. **Tech stack** — Technologies, frameworks, and their versions/roles
-4. **Coding standards** — Language conventions, naming, formatting
-5. **Key domain concepts** — Business entities, vocabulary, bounded contexts
+Architecture context: ${detectedPatterns}
+Design principles to enforce: ${archPrinciples}
 
-6. **ASDD Workflow (mandatory section — describe this exactly)**:
-
-   The development workflow follows Agentic Spec Driven Development (ASDD).
-   Every feature MUST follow this pipeline — no exceptions:
+The file must include:
+1. **Project overview** — Purpose, domain, and target audience
+2. **Architecture** — Describe the detected/default architecture layers with a diagram.
+   If patterns were detected (${ctx.architecturePatterns?.detected?.join(', ') || 'none'}),
+   document them specifically. If not, describe a clean layered architecture.
+3. **Design principles** — For each principle in [${archPrinciples}], write 2-3 specific,
+   actionable rules. Do NOT list generic definitions — write project-specific directives.
+4. **Tech stack** — Technologies, frameworks, and their roles in this project
+5. **Coding standards** — Language conventions, naming, formatting specific to this stack
+6. **Key domain concepts** — Business entities, vocabulary, bounded contexts from the docs
+7. **ASDD Workflow (mandatory section — describe this exactly)**:
 
    \`\`\`
    Step 1 — SPEC (sequential, prerequisite for everything)
@@ -71,10 +73,11 @@ It must include:
    - All agents must read the spec file before generating anything
    - All generated code must reference the spec ID in file headers and commit messages
 
-7. **AI agent roles** — Brief description of each ASDD agent and when to invoke it
-8. **Important constraints** — Security rules, performance requirements, compliance
+8. **AI agent roles** — Brief description of each ASDD agent and when to invoke it
+9. **Security constraints** — OWASP Top 10 compliance, secret management, input validation rules
 
 Write in clear, directive language (imperative: "Use X", "Always Y", "Never Z").
+Be specific to this project — avoid generic boilerplate.
 `,
         },
       ],
@@ -90,23 +93,27 @@ Write in clear, directive language (imperative: "Use X", "Always Y", "Never Z").
           role: 'user',
           content: `${contextBlock}
 
-Generate an \`agents/spec.agent.md\` file — a GitHub Copilot agent definition file.
+Generate \`agents/spec.agent.md\` — a GitHub Copilot agent definition file.
+
+Architecture context: ${detectedPatterns}
 
 This agent is invoked when a developer needs to create a new feature specification.
-The file must define the agent so that, when invoked via @spec, it:
+The agent must:
 
-1. Asks for the feature name, ID, and brief description
-2. Reads \`copilot-instructions.md\` and existing specs in \`.github/specs/\` for context
-3. Asks clarifying questions about the feature (scope, actors, integrations, constraints)
-4. Produces a complete spec file following the template in \`.github/instructions/spec.instructions.md\`
-5. Saves the file as \`.github/specs/FEAT-<id>-<kebab-slug>.md\` with status: draft
-6. Tells the developer: "Review the spec. When ready, set status to 'approved' and run @orchestrator"
+1. Ask for the feature name, ID, and brief description
+2. Read \`copilot-instructions.md\` and existing specs in \`.github/specs/\` for context
+3. Ask clarifying questions about the feature (scope, actors, integrations, constraints)
+4. Identify which architecture layers will be touched (${archPrinciples})
+5. Produce a complete spec following \`.github/instructions/spec.instructions.md\`
+6. Save as \`.github/specs/FEAT-<id>-<kebab-slug>.md\` with status: draft
+7. Tell the developer: "Review the spec. When ready, set status to 'approved' and run @orchestrator"
 
 The agent MUST enforce:
 - Every spec has a unique FEAT-XXX ID (check existing specs to avoid collisions)
 - All 10 sections of the template are filled (no empty sections)
 - Acceptance criteria are written in Given/When/Then format
-- Non-functional requirements are explicit and measurable
+- Non-functional requirements are explicit and measurable ("response time < 200ms p99")
+- Data model section reflects the project's actual domain entities
 
 Use YAML frontmatter format compatible with GitHub Copilot agent files (.agent.md).
 `,
@@ -115,7 +122,6 @@ Use YAML frontmatter format compatible with GitHub Copilot agent files (.agent.m
     }),
   ])
 
-  // ---------- specs/SPEC-TEMPLATE.md — deterministic, no LLM needed ----------
   const specTemplate = generateSpecTemplate(ctx)
 
   return {
@@ -126,11 +132,13 @@ Use YAML frontmatter format compatible with GitHub Copilot agent files (.agent.m
 }
 
 // ---------------------------------------------------------------------------
-// Static spec template (deterministic — canonical empty template)
+// Static spec template (deterministic)
 // ---------------------------------------------------------------------------
 
 function generateSpecTemplate(ctx) {
   const date = new Date().toISOString().split('T')[0]
+  const archPrinciples = ctx.architecturePatterns?.principles?.join(', ') || 'SOLID, DRY, KISS, YAGNI'
+
   return `---
 id: FEAT-XXX
 title: "<Feature title>"
@@ -143,75 +151,81 @@ agents: tdd-backend, tdd-frontend, backend, frontend, documentation, qa
 # FEAT-XXX — <Feature title>
 
 > **ASDD**: Set \`status: approved\` in the frontmatter, then run \`@orchestrator\` to trigger the full pipeline.
+>
+> Principles enforced: ${archPrinciples}
 
 ## 1. Context & Motivation
 
 Why does this feature exist? What problem does it solve?
 Reference related issues (e.g. Closes #123).
 
-## 2. User Stories
+## 2. Goals
 
-- As a **<role>**, I want **<capability>**, so that **<benefit>**
+What this feature must achieve (measurable objectives).
 
-## 3. Acceptance Criteria
+- Goal 1
+- Goal 2
 
-\`\`\`gherkin
-Scenario: <scenario title>
-  Given <precondition>
-  When <action>
-  Then <expected result>
+## 3. Non-Goals
+
+What is explicitly out of scope.
+
+## 4. Actors & Entry Points
+
+| Actor | Entry point | Description |
+|-------|-------------|-------------|
+| User  | UI / API    | ...         |
+
+## 5. Functional Requirements
+
+- REQ-1:
+- REQ-2:
+- REQ-3:
+
+## 6. Acceptance Criteria
+
+**Scenario: <happy path>**
+- Given: <precondition>
+- When: <action>
+- Then: <expected outcome>
+
+**Scenario: <error case>**
+- Given: <precondition>
+- When: <invalid action>
+- Then: <error message is shown>
+
+## 7. Data Model
+
+\`\`\`
+Entity: <Name>
+  id: uuid (PK)
+  field: type — description
+  createdAt: datetime
 \`\`\`
 
-<!-- Add one scenario per acceptance criterion. The @qa agent converts these to test files. -->
+## 8. API Contract (if applicable)
 
-## 4. Data Model
+\`\`\`
+POST /api/v1/<resource>
+Authorization: Bearer <token>
 
-Entities created or modified, fields, types, relationships, constraints.
-Include migration notes if the schema changes.
+Request:  { "field": "value" }
+Response 201: { "id": "...", "field": "value" }
+Response 422: { "error": "validation_failed", "details": [...] }
+\`\`\`
 
-| Entity | Field | Type | Constraints |
-|--------|-------|------|-------------|
-|        |       |      |             |
+## 9. Non-Functional Requirements
 
-## 5. API Contract
+| Requirement | Target |
+|-------------|--------|
+| Response time | p99 < 500ms |
+| Test coverage | ≥ 80% new code |
+| Accessibility | WCAG 2.1 AA |
 
-### REST Endpoints
+## 10. Open Questions
 
-| Method | Path | Auth | Request Body | Response |
-|--------|------|------|-------------|---------|
-
-### Events / Messages _(if event-driven)_
-
-## 6. UI/UX Requirements
-
-Screens, user flows, component breakdown.
-Link to Figma or mockups if available.
-Accessibility requirements (WCAG 2.1 AA minimum).
-
-## 7. Non-Functional Requirements
-
-- **Performance**: target latency / throughput (e.g. p95 < 200 ms)
-- **Security**: specific threat vectors to address
-- **Scalability**: expected volume, growth rate
-- **Observability**: metrics, traces, and logs required
-
-## 8. Out of Scope
-
-Explicitly list what this spec does NOT cover to prevent scope creep:
-- ...
-
-## 9. Dependencies
-
-- **Features**: FEAT-XXX must be completed first
-- **External services**: <service name> API must be available
-- **Infrastructure**: <resource> must be provisioned
-
-## 10. Test Strategy
-
-- **Unit tests**: <what logic to cover>
-- **Integration tests**: <which boundaries to test>
-- **E2E tests**: <critical user paths>
-- **Estimated coverage target**: X%
+- [ ] Question 1
 `
 }
+
 

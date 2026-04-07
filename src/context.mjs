@@ -1,53 +1,41 @@
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import { join, relative, extname } from 'node:path'
 
-// File extensions and names to include in file tree
-const RELEVANT_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.mts', '.cts',
-  '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.rb', '.go', '.rs', '.java', '.kt', '.cs', '.cpp', '.c',
-  '.html', '.css', '.scss', '.sass', '.less',
-  '.vue', '.svelte', '.astro',
-  '.json', '.yaml', '.yml', '.toml', '.env.example',
-  '.md', '.mdx',
-  '.prisma', '.graphql', '.sql',
-  '.sh', '.bash',
-])
-
-const RELEVANT_CONFIG_NAMES = new Set([
-  'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock',
-  'tsconfig.json', 'jsconfig.json',
-  'vite.config.ts', 'vite.config.js', 'vite.config.mjs',
-  'next.config.ts', 'next.config.js', 'next.config.mjs',
-  'nuxt.config.ts', 'nuxt.config.js',
-  'astro.config.mjs', 'astro.config.ts',
-  'tailwind.config.ts', 'tailwind.config.js',
-  'vitest.config.ts', 'vitest.config.js',
-  'jest.config.ts', 'jest.config.js',
-  'playwright.config.ts', 'playwright.config.js',
-  'docker-compose.yml', 'docker-compose.yaml', 'Dockerfile',
-  '.eslintrc.json', '.eslintrc.js', 'eslint.config.js', 'eslint.config.mjs',
-  '.prettierrc', '.prettierrc.json',
-  'wrangler.json', 'wrangler.toml',
-  'gradle.build', 'build.gradle', 'pom.xml',
-  'Cargo.toml', 'go.mod', 'requirements.txt', 'pyproject.toml', 'Gemfile',
-])
-
-// Directories to skip
+// Directories to skip when scanning
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.astro',
   'out', 'coverage', '.cache', '.turbo', 'vendor', '__pycache__',
   '.venv', 'venv', 'target', 'bin', 'obj', '.gradle',
-  '.mypy_cache', '.pytest_cache', '.ruff_cache', '.tox',
-  '.claude',
+  '.mypy_cache', '.pytest_cache', '.ruff_cache', '.tox', '.claude',
 ])
 
-const MAX_TREE_DEPTH = 4
-const MAX_TREE_ENTRIES = 120
-const MAX_README_CHARS = 3000
+// Directories where we look for markdown documentation (in scan order)
+const DOC_DIRS = ['', 'docs', 'wiki', 'doc', 'documentation', '.github', 'architecture', 'adr']
+
+const MAX_DOC_CHARS = 6000   // max chars to read per markdown file
+const MAX_TOTAL_DOCS = 25    // max number of markdown files to include
+const MAX_DIR_DEPTH = 3      // depth for directory overview tree
+
+// Architecture pattern signatures detected from docs
+const ARCHITECTURE_SIGNATURES = [
+  { name: 'Clean Architecture', keywords: ['clean architecture', 'domain layer', 'application layer', 'infrastructure layer', 'interface adapter'] },
+  { name: 'Hexagonal Architecture', keywords: ['hexagonal', 'ports and adapters', 'primary port', 'secondary port', 'driven adapter'] },
+  { name: 'Domain-Driven Design (DDD)', keywords: ['domain-driven', ' ddd ', 'bounded context', 'aggregate root', 'value object', 'domain event', 'ubiquitous language'] },
+  { name: 'CQRS', keywords: ['cqrs', 'command query responsibility', 'command handler', 'query handler', 'read model', 'write model'] },
+  { name: 'Event Sourcing', keywords: ['event sourcing', 'event store', 'event stream'] },
+  { name: 'MVC', keywords: ['model-view-controller', ' mvc ', 'controller layer', 'view layer'] },
+  { name: 'Repository Pattern', keywords: ['repository pattern', 'irepository', 'data repository', 'repository interface'] },
+  { name: 'Event-Driven Architecture', keywords: ['event-driven', 'event bus', 'message broker', 'publish/subscribe', 'pub/sub'] },
+  { name: 'Microservices', keywords: ['microservice', 'service mesh', 'api gateway', 'service discovery'] },
+  { name: 'Layered Architecture', keywords: ['layered architecture', 'n-tier', 'presentation layer', 'business layer', 'data access layer'] },
+]
+
+const DEFAULT_PRINCIPLES = ['SOLID', 'DRY', 'KISS', 'YAGNI', 'Separation of Concerns']
 
 /**
- * Reads and builds the project context from the given root directory.
+ * Reads project context by scanning only markdown documentation files.
+ * Source code is not read — only .md/.mdx docs and package.json metadata.
+ *
  * @param {string} rootDir - Absolute path to the project root
  * @param {object} [options]
  * @param {(event: {type: string, path?: string, message?: string}) => void} [options.onProgress]
@@ -57,24 +45,26 @@ export function readProjectContext(rootDir, options = {}) {
   const { onProgress } = options
 
   const packageJson = readPackageJson(rootDir, onProgress)
-  const readme = readReadme(rootDir, onProgress)
-  const { tree: fileTree, stats: scanStats } = buildFileTree(rootDir, onProgress)
+  const docs = readMarkdownDocs(rootDir, onProgress)
   const techStack = detectTechStack(rootDir, packageJson)
+  const architecturePatterns = detectArchitecturePatterns(docs)
+  const directoryTree = buildDirectoryTree(rootDir)
 
   onProgress?.({
     type: 'summary',
-    message: `Scanned ${scanStats.totalVisitedDirs} folders and ${scanStats.totalVisitedFiles} files (included ${scanStats.includedFiles} in context tree)`,
+    message: `Read ${docs.length} documentation file${docs.length !== 1 ? 's' : ''}`,
   })
 
   return {
     rootDir,
     projectName: packageJson?.name ?? extractNameFromPath(rootDir),
-    description: packageJson?.description ?? extractDescriptionFromReadme(readme),
+    description: packageJson?.description ?? extractDescriptionFromDocs(docs),
+    version: packageJson?.version,
     techStack,
-    fileTree,
+    architecturePatterns,
+    docs,
+    directoryTree,
     packageJson,
-    readme,
-    contextStats: scanStats,
   }
 }
 
@@ -86,47 +76,100 @@ function readPackageJson(rootDir, onProgress) {
   const filePath = join(rootDir, 'package.json')
   if (!existsSync(filePath)) return null
   try {
-    onProgress?.({ type: 'file-read', path: relative(rootDir, filePath) || 'package.json' })
-    return JSON.parse(readFileSync(filePath, 'utf8'))
+    onProgress?.({ type: 'file-read', path: 'package.json' })
+    const pkg = JSON.parse(readFileSync(filePath, 'utf8'))
+    onProgress?.({ type: 'file-indexed', path: 'package.json' })
+    return pkg
   } catch {
     return null
   }
 }
 
-function readReadme(rootDir, onProgress) {
-  const candidates = ['README.md', 'README.mdx', 'readme.md', 'Readme.md']
-  for (const name of candidates) {
-    const filePath = join(rootDir, name)
-    if (existsSync(filePath)) {
+/**
+ * Reads markdown files from known documentation directories only.
+ * Does not recurse into source code directories.
+ */
+function readMarkdownDocs(rootDir, onProgress) {
+  const docs = []
+  const seen = new Set()
+
+  for (const docDir of DOC_DIRS) {
+    if (docs.length >= MAX_TOTAL_DOCS) break
+
+    const scanDir = docDir ? join(rootDir, docDir) : rootDir
+    if (!existsSync(scanDir)) continue
+
+    let entries
+    try {
+      entries = readdirSync(scanDir)
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      if (docs.length >= MAX_TOTAL_DOCS) break
+
+      const ext = extname(entry).toLowerCase()
+      if (ext !== '.md' && ext !== '.mdx') continue
+
+      const fullPath = join(scanDir, entry)
+      const relPath = relative(rootDir, fullPath)
+
+      // Skip generated spec files to avoid circular context
+      if (relPath.startsWith('.github\\specs') || relPath.startsWith('.github/specs')) continue
+
+      if (seen.has(relPath)) continue
+      seen.add(relPath)
+
       try {
-        onProgress?.({ type: 'file-read', path: relative(rootDir, filePath) || name })
-        const content = readFileSync(filePath, 'utf8')
-        return content.slice(0, MAX_README_CHARS)
+        onProgress?.({ type: 'file-read', path: relPath })
+        const raw = readFileSync(fullPath, 'utf8')
+        const content = raw.slice(0, MAX_DOC_CHARS)
+        docs.push({ path: relPath, content })
+        onProgress?.({ type: 'file-indexed', path: relPath })
       } catch {
-        return ''
+        // unreadable file — skip
       }
     }
   }
-  return ''
+
+  return docs
 }
 
-function buildFileTree(rootDir, onProgress) {
-  const lines = []
-  let count = 0
-  let truncationNotified = false
-  const stats = {
-    totalVisitedDirs: 0,
-    totalVisitedFiles: 0,
-    includedFiles: 0,
-    skippedDirs: 0,
-    truncated: false,
+/**
+ * Analyzes markdown docs to detect architecture patterns.
+ * Falls back to universal design principles if nothing specific is found.
+ */
+function detectArchitecturePatterns(docs) {
+  if (!docs.length) {
+    return { detected: [], principles: DEFAULT_PRINCIPLES, isDefault: true }
   }
 
+  const combined = docs.map((d) => d.content).join('\n').toLowerCase()
+  const detected = []
+
+  for (const { name, keywords } of ARCHITECTURE_SIGNATURES) {
+    if (keywords.some((kw) => combined.includes(kw))) {
+      detected.push(name)
+    }
+  }
+
+  // Always include base principles alongside detected patterns
+  const principles = detected.length > 0
+    ? [...detected, ...DEFAULT_PRINCIPLES]
+    : DEFAULT_PRINCIPLES
+
+  return { detected, principles, isDefault: detected.length === 0 }
+}
+
+/**
+ * Builds a lightweight directory structure overview (directories only, no file contents).
+ */
+function buildDirectoryTree(rootDir) {
+  const lines = []
+
   function walk(dir, depth, prefix) {
-    if (depth > MAX_TREE_DEPTH || count >= MAX_TREE_ENTRIES) return
-
-    stats.totalVisitedDirs++
-
+    if (depth > MAX_DIR_DEPTH) return
     let entries
     try {
       entries = readdirSync(dir)
@@ -134,55 +177,24 @@ function buildFileTree(rootDir, onProgress) {
       return
     }
 
-    // Sort: directories first, then files
-    entries.sort((a, b) => {
-      const aIsDir = isDir(join(dir, a))
-      const bIsDir = isDir(join(dir, b))
-      if (aIsDir && !bIsDir) return -1
-      if (!aIsDir && bIsDir) return 1
-      return a.localeCompare(b)
-    })
+    const dirs = entries.filter((e) => {
+      const p = join(dir, e)
+      return isDir(p) && !SKIP_DIRS.has(e)
+    }).sort()
 
-    for (let i = 0; i < entries.length; i++) {
-      if (count >= MAX_TREE_ENTRIES) {
-        lines.push(`${prefix}... (truncated)`)
-        stats.truncated = true
-        if (!truncationNotified) {
-          onProgress?.({ type: 'truncated', message: 'Context tree truncated at maximum entry limit' })
-          truncationNotified = true
-        }
-        return
-      }
-
-      const name = entries[i]
+    for (let i = 0; i < dirs.length; i++) {
+      const name = dirs[i]
       const fullPath = join(dir, name)
-      const isLast = i === entries.length - 1
+      const isLast = i === dirs.length - 1
       const connector = isLast ? '└── ' : '├── '
       const childPrefix = isLast ? prefix + '    ' : prefix + '│   '
-
-      if (isDir(fullPath)) {
-        if (SKIP_DIRS.has(name)) {
-          stats.skippedDirs++
-          continue
-        }
-        lines.push(`${prefix}${connector}${name}/`)
-        count++
-        walk(fullPath, depth + 1, childPrefix)
-      } else {
-        stats.totalVisitedFiles++
-        const ext = extname(name).toLowerCase()
-        if (RELEVANT_EXTENSIONS.has(ext) || RELEVANT_CONFIG_NAMES.has(name)) {
-          lines.push(`${prefix}${connector}${name}`)
-          count++
-          stats.includedFiles++
-          onProgress?.({ type: 'file-indexed', path: relative(rootDir, fullPath) })
-        }
-      }
+      lines.push(`${prefix}${connector}${name}/`)
+      walk(fullPath, depth + 1, childPrefix)
     }
   }
 
   walk(rootDir, 0, '')
-  return { tree: lines.join('\n'), stats }
+  return lines.join('\n')
 }
 
 function isDir(p) {
@@ -267,10 +279,11 @@ function extractNameFromPath(dir) {
   return dir.split(/[\\/]/).filter(Boolean).pop() ?? 'my-project'
 }
 
-function extractDescriptionFromReadme(readme) {
-  if (!readme) return ''
-  // Try to extract first non-heading paragraph
-  const lines = readme.split('\n').map((l) => l.trim()).filter(Boolean)
+function extractDescriptionFromDocs(docs) {
+  if (!docs.length) return ''
+  // Look in the README doc first, then any doc
+  const readme = docs.find((d) => d.path.toLowerCase().endsWith('readme.md')) ?? docs[0]
+  const lines = readme.content.split('\n').map((l) => l.trim()).filter(Boolean)
   for (const line of lines) {
     if (!line.startsWith('#') && line.length > 10) return line.slice(0, 200)
   }

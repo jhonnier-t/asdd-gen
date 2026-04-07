@@ -1,20 +1,17 @@
 import { chat, buildContextBlock } from '../llm.mjs'
 
 const SYSTEM = `You are a senior DevOps engineer and TDD advocate.
-Generate git hooks using Husky that enforce code quality and ASDD workflow conventions
-at commit time. All hooks must be cross-platform (Windows + Unix) and fast (fail fast).
+Generate commit convention config files that enforce code quality and ASDD workflow conventions.
+All configs must be cross-platform (Windows + Unix) and fast (fail fast).
 
-Output format: Raw shell script or config file content only. No markdown fences or prose.`
+Output format: Raw JS config file content only. No markdown fences or prose.`
 
 /**
- * Generates git hooks and commit convention config files.
+ * Generates commit convention config files.
  *
  * All files use ROOT: prefix (written to project root, not .github/).
  *
  * Produces:
- *   ROOT:.husky/pre-commit       — lint-staged (lint + type-check)
- *   ROOT:.husky/commit-msg       — commitlint (Conventional Commits)
- *   ROOT:.husky/pre-push         — full test suite before push
  *   ROOT:commitlint.config.mjs   — commitlint configuration
  *   ROOT:lint-staged.config.mjs  — lint-staged per-filetype rules
  *
@@ -27,9 +24,7 @@ export async function runGitHooksAgent({ token, model, ctx }) {
 
   // Detect package manager
   const pkgManager = detectPackageManager(ctx)
-  const testCmd = detectTestCommand(stack)
   const lintCmd = detectLintCommand(stack)
-  const typeCheckCmd = detectTypeCheckCommand(stack)
 
   const [commitlintConfig, lintStagedConfig] = await Promise.all([
     // commitlint.config.mjs — LLM for project-specific scopes
@@ -104,71 +99,10 @@ Output ONLY the JS file content, no markdown fences.
     }),
   ])
 
-  // Hooks are deterministic based on detected tools — no LLM needed
-  const preCommit = generatePreCommitHook(pkgManager)
-  const commitMsg = generateCommitMsgHook(pkgManager)
-  const prePush = generatePrePushHook(pkgManager, testCmd, typeCheckCmd)
-
   return {
-    'ROOT:.husky/pre-commit': preCommit,
-    'ROOT:.husky/commit-msg': commitMsg,
-    'ROOT:.husky/pre-push': prePush,
     'ROOT:commitlint.config.mjs': commitlintConfig,
     'ROOT:lint-staged.config.mjs': lintStagedConfig,
   }
-}
-
-// ---------------------------------------------------------------------------
-// Deterministic generators (no LLM cost)
-// ---------------------------------------------------------------------------
-
-function generatePreCommitHook(pkgManager) {
-  const exec = pkgManagerExec(pkgManager)
-  return `#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-# Run lint-staged: formats and lints only staged files
-${exec} lint-staged
-`
-}
-
-function generateCommitMsgHook(pkgManager) {
-  const exec = pkgManagerExec(pkgManager)
-  return `#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-# Validate commit message follows Conventional Commits (ASDD requirement)
-${exec} commitlint --edit "$1"
-`
-}
-
-function generatePrePushHook(pkgManager, testCmd, typeCheckCmd) {
-  const exec = pkgManagerExec(pkgManager)
-  const lines = [
-    '#!/usr/bin/env sh',
-    '. "$(dirname -- "$0")/_/husky.sh"',
-    '',
-    '# ASDD pre-push gate: type-check + full test suite must pass before pushing',
-    '',
-  ]
-
-  if (typeCheckCmd) {
-    lines.push(`# Type checking`)
-    lines.push(`${exec} ${typeCheckCmd}`)
-    lines.push('')
-  }
-
-  if (testCmd) {
-    lines.push(`# Full test suite`)
-    lines.push(`${exec} ${testCmd}`)
-    lines.push('')
-  } else {
-    lines.push('# Add your test command here')
-    lines.push('# npm test')
-    lines.push('')
-  }
-
-  return lines.join('\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +113,6 @@ function detectPackageManager(ctx) {
   if (ctx.techStack.includes('bun')) return 'bun'
   const pkg = ctx.packageJson
   if (!pkg) return 'npm'
-  // Check packageManager field
   if (pkg.packageManager?.startsWith('pnpm')) return 'pnpm'
   if (pkg.packageManager?.startsWith('yarn')) return 'yarn'
   if (pkg.packageManager?.startsWith('bun')) return 'bun'
@@ -190,23 +123,10 @@ function pkgManagerExec(pm) {
   return pm === 'npm' ? 'npx' : pm === 'bun' ? 'bunx' : pm
 }
 
-function detectTestCommand(stack) {
-  if (stack.includes('vitest')) return 'vitest run'
-  if (stack.includes('jest')) return 'jest --passWithNoTests'
-  if (stack.includes('playwright')) return 'playwright test'
-  if (stack.includes('python')) return 'pytest'
-  return null
-}
-
 function detectLintCommand(stack) {
   if (stack.some((s) => s.includes('oxlint'))) return 'oxlint'
   if (stack.includes('typescript') || stack.includes('react') || stack.includes('vue'))
     return 'eslint'
   if (stack.includes('python')) return 'ruff check'
   return 'eslint'
-}
-
-function detectTypeCheckCommand(stack) {
-  if (stack.includes('typescript')) return 'tsc --noEmit'
-  return null
 }
