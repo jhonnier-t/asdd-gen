@@ -212,9 +212,10 @@ The spec document is the single source of truth that all agents read before exec
 Workflow:
 1. Developer (or @spec agent) creates \`.github/specs/FEAT-<id>-<slug>.md\`
 2. Spec is reviewed and approved (or iterated with @spec)
-3. Once spec is approved → run @orchestrator to trigger the full parallel pipeline:
-   - Phase 2 (parallel): @tdd-backend, @tdd-frontend, @backend, @frontend all READ the spec
-   - Phase 3 (parallel): @documentation, @qa, @orchestrator all READ the spec
+3. Once spec is approved → run @orchestrator to trigger the full pipeline:
+   - Phase 2 (parallel — TDD Red): @tdd-backend + @tdd-frontend write failing tests
+   - Phase 3 (parallel — TDD Green): @backend + @frontend implement to pass tests
+   - Phase 4 (parallel): @documentation + @qa
 4. All generated code/tests must reference the spec ID in commit messages
 
 ## Spec File Naming Convention
@@ -333,8 +334,9 @@ Explain the pipeline phases and how agents collaborate.
 
 Show the pipeline diagram:
 Phase 1 → spec
-Phase 2 (parallel) → tdd-backend, tdd-frontend, backend, frontend
-Phase 3 (parallel) → documentation, qa, orchestrator
+Phase 2 (parallel — TDD Red) → tdd-backend, tdd-frontend (write failing tests)
+Phase 3 (parallel — TDD Green) → backend, frontend (implement to pass tests)
+Phase 4 (parallel) → documentation, qa
 
 ## Available Agents
 
@@ -474,7 +476,7 @@ function generateSkillFiles(ctx) {
   return {
     'skills/asdd-orchestrate/SKILL.md': `---
 name: asdd-orchestrate
-description: "Orchestrates the full ASDD pipeline. Phase 1 (Spec) → Phase 2 (Backend ∥ Frontend) → Phase 3 (Tests ∥) → Phase 4 (QA)."
+description: "Orchestrates the full ASDD pipeline. Phase 1 (Spec) → Phase 2 (TDD Red ∥) → Phase 3 (TDD Green ∥) → Phase 4 (QA)."
 argument-hint: "<feature-name> | status"
 ---
 
@@ -484,16 +486,21 @@ argument-hint: "<feature-name> | status"
 
 \`\`\`
 [PHASE 1 — SEQUENTIAL]
-  spec → .github/specs/<feature>.spec.md  (DRAFT → APPROVED)
+  @spec → .github/specs/<feature>.spec.md  (DRAFT → APPROVED)
 
-[PHASE 2 — PARALLEL ∥]
-  backend  ∥  frontend
+[PHASE 2 — PARALLEL ∥ — TDD Red]
+  @tdd-backend  ∥  @tdd-frontend
+  → write failing tests — NO implementation yet
+  → verify: all tests must FAIL before Phase 3
 
-[PHASE 3 — PARALLEL ∥]
-  tdd-backend  ∥  tdd-frontend
+[PHASE 3 — PARALLEL ∥ — TDD Green]
+  @backend  ∥  @frontend
+  → implement code to make Phase 2 tests pass
+  → verify: all tests must PASS before Phase 4
 
-[PHASE 4 — SEQUENTIAL]
-  qa → Gherkin scenarios + risk analysis
+[PHASE 4 — PARALLEL ∥]
+  @qa ∥ @documentation (optional)
+  → Gherkin scenarios + risk analysis + docs
 \`\`\`
 
 ## Process
@@ -501,9 +508,9 @@ argument-hint: "<feature-name> | status"
    - Does not exist → invoke \`/generate-spec\` and wait
    - \`DRAFT\` → ask user to review and approve
    - \`APPROVED\` → update to \`IN_PROGRESS\` and continue
-2. Launch Phase 2 in parallel (@backend + @frontend)
-3. When Phase 2 completes → launch Phase 3 in parallel (@tdd-backend + @tdd-frontend)
-4. When Phase 3 completes → launch Phase 4 (@qa)
+2. Launch Phase 2 in parallel (@tdd-backend + @tdd-frontend) — Red Phase
+3. Verify tests FAIL → then launch Phase 3 in parallel (@backend + @frontend) — Green Phase
+4. Verify ALL tests pass → then launch Phase 4 (@qa) — optionally @documentation
 5. Update spec to \`IMPLEMENTED\` and report final status
 
 ## Status command

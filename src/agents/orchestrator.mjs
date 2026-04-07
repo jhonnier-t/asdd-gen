@@ -33,10 +33,15 @@ Pipeline rules:
 **Prerequisite (must complete first):**
   @spec → generates feature spec; nothing else runs without an approved spec
 
-**Parallel group 1 (after spec approved):**
-  @tdd-backend + @tdd-frontend + @backend + @frontend
+**Parallel group 1 — TDD Red Phase (after spec approved):**
+  @tdd-backend + @tdd-frontend write failing tests
+  Tests MUST fail — no implementation exists yet. Verify failure before proceeding.
 
-**Parallel group 2 (after group 1):**
+**Parallel group 2 — TDD Green Phase (after group 1 tests confirmed failing):**
+  @backend + @frontend implement code to make tests pass
+  ALL tests MUST pass before moving to group 3.
+
+**Parallel group 3 (after group 2):**
   @documentation + @qa
 
 The orchestrator agent must:
@@ -60,10 +65,10 @@ Include YAML frontmatter with:
   agents: (list all sub-agent names: spec, tdd-backend, tdd-frontend, backend, frontend, documentation, qa)
   handoffs: (one handoff per phase step, format: label / agent / prompt / send)
     - "[1] Generar Spec" → agent: spec, send: true
-    - "[2A] Implementar Backend (paralelo)" → agent: backend, send: false
-    - "[2B] Implementar Frontend (paralelo)" → agent: frontend, send: false
-    - "[3A] Tests Backend (paralelo)" → agent: tdd-backend, send: false
-    - "[3B] Tests Frontend (paralelo)" → agent: tdd-frontend, send: false
+    - "[2A] Tests Backend — Red Phase (paralelo)" → agent: tdd-backend, send: false
+    - "[2B] Tests Frontend — Red Phase (paralelo)" → agent: tdd-frontend, send: false
+    - "[3A] Implementar Backend — Green Phase (paralelo)" → agent: backend, send: false
+    - "[3B] Implementar Frontend — Green Phase (paralelo)" → agent: frontend, send: false
     - "[4] Escenarios QA" → agent: qa, send: false
     - "[5] Documentación (opcional)" → agent: documentation, send: false
   (do NOT include a model field — orchestrator inherits default)
@@ -85,14 +90,32 @@ Generate \`prompts/00-orchestrate.prompt.md\` — the main ASDD orchestration pr
 
 Architecture: ${detectedPatterns}
 
-Structure with:
-- Variables: {{spec_file}}, {{feature_name}}
-- Pre-flight checklist (spec status, sections complete, no open questions)
-- Per-group execution steps with expected outputs
-- Failure handling per agent
-- Final validation checklist (tests pass, docs updated, changelog updated)
+Use this EXACT frontmatter format (matching GitHub Copilot .prompt.md convention):
+\`\`\`yaml
+---
+name: full-flow
+description: <keyword-rich description mentioning ASDD pipeline, spec, TDD, phases>
+argument-hint: "<nombre-feature>"
+agent: orchestrator
+tools:
+  - read/readFile
+  - search/listDirectory
+  - search
+  - agent
+---
+\`\`\`
 
-Use YAML frontmatter with mode: agent.
+IMPORTANT rules for the frontmatter:
+- Use "agent" field with the agent name — NOT "mode: agent"
+- Use \`\${input:featureName:nombre del feature en kebab-case}\` for variables — NOT {{mustache}} syntax
+- Do NOT include a "mode" field
+
+Body structure:
+- Opening: "Orquesta el flujo ASDD completo para el feature especificado."
+- Feature variable line: "**Feature**: \${input:featureName:nombre del feature en kebab-case}"
+- Numbered steps covering: spec validation, Phase 2 TDD Red (parallel), Phase 3 TDD Green (parallel), Phase 4 QA
+- Each phase must include checkpoint: verify tests FAIL after Phase 2, verify tests PASS after Phase 3
+- Final validation checklist (tests pass, CHANGELOG updated, spec status updated)
 `,
       },
     ],

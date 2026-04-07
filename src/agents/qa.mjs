@@ -57,13 +57,36 @@ Include YAML frontmatter:
   handoffs:
     - label: "Volver al Orchestrator" → agent: orchestrator, prompt: "QA completado. Escenarios y riesgos disponibles. Revisa el estado del flujo ASDD.", send: false — a reusable QA prompt.
 
-Structure with:
-- Variables: {{spec_file}}, {{feat_id}}, {{slug}}
-- Scenario coverage matrix (happy path / negative / edge / boundary)
-- Gherkin quality checklist
-- Output: .feature file path with all scenarios
+Genera un prompt reutilizable para generacion de escenarios Gherkin y matriz de riesgos.
 
-Use YAML frontmatter with mode: agent.
+IMPORTANT - use this EXACT frontmatter format (GitHub Copilot .prompt.md convention):
+\`\`\`yaml
+---
+name: qa-task
+description: <keyword-rich one-line description>
+argument-hint: "nombre-del-feature"
+agent: qa
+tools:
+  - edit/createFile
+  - edit/editFiles
+  - read/readFile
+  - search/listDirectory
+  - search
+---
+\`\`\`
+
+Rules:
+- "agent" field must contain the agent NAME - NOT "mode: agent"
+- Variables use \${input:featureName:nombre del feature en kebab-case} syntax - NOT {{mustache}}
+- Do NOT include a "mode" field
+- Body: imperative numbered steps in Spanish with concrete file-path references
+
+Body must cover:
+1. Leer spec en .github/specs/\${input:featureName}.spec.md - criterios de aceptacion
+2. Generar escenarios Gherkin: @smoke, @error-path, @edge-case; guardar en .github/specs/scenarios/
+3. Generar matriz de riesgos (Probabilidad x Impacto): Seguridad, Datos, Performance, UX
+4. Todo riesgo ALTO debe tener mitigacion concreta
+Restricciones: solo artefactos QA - NO modificar codigo ni specs; escenarios independientes
 `,
       },
     ],

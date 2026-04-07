@@ -70,14 +70,38 @@ Include YAML frontmatter:
 
 Architecture: ${detectedPatterns}
 
-Structure with:
-- Variables: {{spec_file}}, {{component_name}}, {{feature_name}}
-- Test coverage checklist (render, interaction, a11y, async states)
-- Mock strategy for API/router/auth context
-- \"Tests must fail\" verification step
-- Output: list of test files with paths
+Genera un prompt reutilizable para escritura de pruebas de frontend que deben FALLAR (TDD Red phase).
 
-Use YAML frontmatter with mode: agent.
+IMPORTANT - use this EXACT frontmatter format (GitHub Copilot .prompt.md convention):
+\`\`\`yaml
+---
+name: tdd-frontend
+description: <keyword-rich one-line description>
+argument-hint: "nombre-del-feature"
+agent: tdd-frontend
+tools:
+  - edit/createFile
+  - edit/editFiles
+  - read/readFile
+  - search/listDirectory
+  - search
+  - execute/runInTerminal
+---
+\`\`\`
+
+Rules:
+- "agent" field must contain the agent NAME - NOT "mode: agent"
+- Variables use \${input:featureName:nombre del feature en kebab-case} syntax - NOT {{mustache}}
+- Do NOT include a "mode" field
+- Body: imperative numbered steps in Spanish with concrete file-path references
+
+Body must cover:
+1. Leer spec en .github/specs/\${input:featureName}.spec.md - seccion UI/UX
+2. Escribir pruebas de componente por criterio: loading, error, vacio, con datos
+3. Mockear todas las llamadas API - sin dependencias reales
+4. Verificar que TODAS las pruebas FALLAN antes de entregar
+5. NO escribir codigo de componentes - solo pruebas
+Restricciones: referencia Spec ID en encabezado, no modificar pruebas existentes
 `,
       },
     ],

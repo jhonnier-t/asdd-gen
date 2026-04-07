@@ -92,14 +92,38 @@ Generate \`prompts/04-backend.prompt.md\` — a reusable prompt for backend impl
 
 Architecture: ${detectedPatterns}
 
-Structure with:
-- Variables: {{spec_file}}, {{layer}}, {{test_file_path}}
-- Per-layer implementation checklist (Domain → Application → Infrastructure → API)
-- Security checklist (OWASP items to verify before finishing)
-- Output expectations (file paths, function signatures, exports)
-- "Definition of Done" section: all tests pass, no security violations, conventions matched
+Genera un prompt reutilizable para implementacion de backend (TDD Green phase).
 
-Use YAML frontmatter with mode: agent.
+IMPORTANT - use this EXACT frontmatter format (GitHub Copilot .prompt.md convention):
+\`\`\`yaml
+---
+name: backend-task
+description: <keyword-rich one-line description>
+argument-hint: "nombre-del-feature"
+agent: backend
+tools:
+  - edit/createFile
+  - edit/editFiles
+  - read/readFile
+  - search/listDirectory
+  - search
+  - execute/runInTerminal
+---
+\`\`\`
+
+Rules:
+- "agent" field must contain the agent NAME - NOT "mode: agent"
+- Variables use \${input:featureName:nombre del feature en kebab-case} syntax - NOT {{mustache}}
+- Do NOT include a "mode" field
+- Body: imperative numbered steps in Spanish with concrete file-path references
+
+Body must cover:
+1. Leer spec en .github/specs/\${input:featureName}.spec.md
+2. Leer pruebas fallidas - son el contrato de implementacion
+3. Implementar en orden: Modelos -> Repositorios -> Servicios -> Controladores/Rutas
+4. Verificar que TODAS las pruebas pasan
+5. NO modificar pruebas
+Restricciones: seguir .github/instructions/backend.instructions.md, OWASP, referencia Spec ID
 `,
       },
     ],

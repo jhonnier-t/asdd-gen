@@ -64,13 +64,37 @@ Include YAML frontmatter:
 
 Architecture: ${detectedPatterns}
 
-Structure with:
-- Variables: {{spec_file}}, {{feature_name}}, {{changed_files}}
-- Documentation artifacts checklist (CHANGELOG, README, ADR, API docs, .env.example)
-- Style guide (tone: directive/imperative, format per artifact type)
-- \"Definition of Done\" for documentation: all artifacts complete, spec referenced
+Genera un prompt reutilizable para documentacion tecnica de un feature completado.
 
-Use YAML frontmatter with mode: agent.
+IMPORTANT - use this EXACT frontmatter format (GitHub Copilot .prompt.md convention):
+\`\`\`yaml
+---
+name: doc-task
+description: <keyword-rich one-line description>
+argument-hint: "nombre-del-feature"
+agent: documentation
+tools:
+  - edit/createFile
+  - edit/editFiles
+  - read/readFile
+  - search/listDirectory
+  - search
+---
+\`\`\`
+
+Rules:
+- "agent" field must contain the agent NAME - NOT "mode: agent"
+- Variables use \${input:featureName:nombre del feature en kebab-case} syntax - NOT {{mustache}}
+- Do NOT include a "mode" field
+- Body: imperative numbered steps in Spanish with concrete file-path references
+
+Body must cover:
+1. Leer spec en .github/specs/\${input:featureName}.spec.md
+2. Generar entrada en CHANGELOG.md bajo [Unreleased]
+3. Actualizar README.md si hay cambios visibles al usuario
+4. Crear ADR en docs/adr/ si se tomaron decisiones arquitectonicas
+5. Agregar docs de API inline si se aniadieron nuevas rutas
+Restricciones: solo documentar - NO modificar codigo de implementacion
 `,
       },
     ],
